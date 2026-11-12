@@ -5,13 +5,16 @@ from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message
 
 import texts
 from database import SalonDB, SlotUnavailable
 from keyboards import (
     booking_actions,
+    client_reply_menu,
     dates_keyboard,
+    inline_keyboard,
+    next_step_keyboard,
     phone_keyboard,
     services_keyboard,
     times_keyboard,
@@ -19,6 +22,13 @@ from keyboards import (
 from notifications import notify_master
 
 router = Router()
+
+
+@router.message.middleware()
+async def reset_reply_menu_state(handler, message: Message, data):
+    if message.text in {texts.CLIENT_BOOK, texts.CLIENT_BOOKINGS}:
+        await data["state"].clear()
+    return await handler(message, data)
 
 
 class BookingStates(StatesGroup):
@@ -72,12 +82,11 @@ async def show_confirmation(message, state: FSMContext, db: SalonDB) -> None:
     }
     await state.set_state(BookingStates.confirm)
     text = f"{texts.CONFIRM}\n\n{texts.booking_card(booking)}"
-    from keyboards import inline_keyboard
-
+    keyboard = inline_keyboard([("Подтвердить запись", "confirm")])
     if isinstance(message, Message):
-        await message.answer(text, reply_markup=inline_keyboard([("Подтвердить запись", "confirm")]))
+        await message.answer(text, reply_markup=keyboard)
     else:
-        await message.edit_text(text, reply_markup=inline_keyboard([("Подтвердить запись", "confirm")]))
+        await message.edit_text(text, reply_markup=keyboard)
 
 
 @router.message(CommandStart())
@@ -85,12 +94,16 @@ async def client_start(message: Message, state: FSMContext, db: SalonDB, master_
     if message.from_user.id == master_id:
         return
     await state.clear()
-    from keyboards import inline_keyboard
-
     await message.answer(
-        texts.WELCOME,
-        reply_markup=inline_keyboard([("Записаться", "book")]),
+        f"{texts.WELCOME}\n\n{texts.CLIENT_MENU_HINT}",
+        reply_markup=client_reply_menu(),
     )
+
+
+@router.message(F.text == texts.CLIENT_BOOK)
+async def start_booking_message(message: Message, state: FSMContext, db: SalonDB) -> None:
+    await state.clear()
+    await show_services(message, state, db)
 
 
 @router.callback_query(F.data == "book")
@@ -98,6 +111,38 @@ async def start_booking(callback: CallbackQuery, state: FSMContext, db: SalonDB)
     await state.clear()
     await show_services(callback.message, state, db, edit=True)
     await callback.answer()
+
+
+@router.message(F.text == texts.CLIENT_BOOKINGS)
+@router.callback_query(F.data == "client_bookings")
+async def my_bookings(event, db: SalonDB) -> None:
+    message = event.message if isinstance(event, CallbackQuery) else event
+    rows = db.conn.execute(
+        """
+        SELECT b.*, s.name AS service_name, s.price, s.duration_min,
+               c.tg_id, c.name AS client_name, c.phone
+        FROM bookings b
+        JOIN services s ON s.id = b.service_id
+        JOIN clients c ON c.id = b.client_id
+        WHERE b.master_id = ? AND c.tg_id = ? AND b.status = 'active'
+        ORDER BY b.start_at
+        """,
+        (db.master_id, event.from_user.id),
+    ).fetchall()
+    if not rows:
+        keyboard = inline_keyboard([(texts.CLIENT_BOOK, "book")])
+        if isinstance(event, CallbackQuery):
+            await message.edit_text(texts.CLIENT_NO_BOOKINGS, reply_markup=keyboard)
+            await event.answer()
+        else:
+            await message.answer(texts.CLIENT_NO_BOOKINGS, reply_markup=keyboard)
+        return
+    for booking in rows:
+        await message.answer(
+            texts.booking_card(booking), reply_markup=booking_actions(booking["id"])
+        )
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
 
 @router.callback_query(F.data.startswith("service:"))
@@ -149,10 +194,8 @@ async def choose_time(callback: CallbackQuery, state: FSMContext, db: SalonDB, b
             return
         booking = db.get_booking(new_id)
         await state.clear()
-        await callback.message.edit_text(
-            f"{texts.RESCHEDULED}\n\n{texts.booking_card(booking)}",
-            reply_markup=booking_actions(new_id),
-        )
+        text = f"{texts.done_text('запись перенесена')}\n\n{texts.booking_card(booking)}"
+        await callback.message.edit_text(text, reply_markup=booking_actions(new_id))
         await notify_master(bot, master_id, booking, "Запись перенесена")
         await callback.answer()
         return
@@ -182,7 +225,7 @@ async def save_phone(message: Message, state: FSMContext, db: SalonDB) -> None:
         await message.answer(texts.INVALID_PHONE, reply_markup=phone_keyboard())
         return
     await state.update_data(phone=phone)
-    await message.answer("Контакт сохранён.", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Контакт сохранён.", reply_markup=client_reply_menu())
     await show_confirmation(message, state, db)
 
 
@@ -206,9 +249,8 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext, db: SalonD
         return
     booking = db.get_booking(booking_id)
     await state.clear()
-    await callback.message.edit_text(
-        texts.confirmation(booking), reply_markup=booking_actions(booking_id)
-    )
+    text = f"{texts.done_text('запись создана')}\n\n{texts.booking_card(booking)}"
+    await callback.message.edit_text(text, reply_markup=booking_actions(booking_id))
     await notify_master(bot, master_id, booking)
     await callback.answer()
 
@@ -239,8 +281,6 @@ async def cancel_request(callback: CallbackQuery, db: SalonDB) -> None:
     if not booking or booking["status"] != "active" or booking["tg_id"] != callback.from_user.id:
         await callback.answer(texts.BOOKING_NOT_FOUND, show_alert=True)
         return
-    from keyboards import inline_keyboard
-
     keyboard = inline_keyboard([
         ("Да, отменить", f"cancel_yes:{booking_id}"),
         ("Оставить запись", f"cancel_no:{booking_id}"),
@@ -275,7 +315,9 @@ async def cancel_yes(callback: CallbackQuery, db: SalonDB, bot, master_id: int) 
     except ValueError:
         await callback.answer(texts.BOOKING_NOT_FOUND, show_alert=True)
         return
-    await callback.message.edit_text(texts.CANCELLED)
+    await callback.message.edit_text(
+        texts.done_text("запись отменена"), reply_markup=next_step_keyboard("client")
+    )
     await notify_master(bot, master_id, booking, "Запись отменена")
     await callback.answer()
 
@@ -303,7 +345,7 @@ async def start_reinvite(callback: CallbackQuery, state: FSMContext, db: SalonDB
         "source": "reinvite",
         "reinvited_from_id": old_id,
     })
-    if not old["is_active"] if "is_active" in old.keys() else not db.get_service(old["service_id"])["is_active"]:
+    if not old["is_active"]:
         await show_services(callback.message, state, db, edit=True)
     else:
         await show_dates(callback.message, state, db)
@@ -317,5 +359,8 @@ async def opt_out(callback: CallbackQuery, db: SalonDB) -> None:
         await callback.answer(texts.BOOKING_NOT_FOUND, show_alert=True)
         return
     db.set_reinvite_opt_out(booking["client_id"])
-    await callback.message.edit_text(texts.OPT_OUT)
+    await callback.message.edit_text(
+        texts.done_text("повторные приглашения отключены"),
+        reply_markup=next_step_keyboard("client"),
+    )
     await callback.answer()

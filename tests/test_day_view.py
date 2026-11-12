@@ -1,0 +1,49 @@
+from datetime import datetime, time, timedelta
+
+import pytest
+
+from admin import day_card, day_keyboard, week_schedule_text
+from database import LOCAL_TZ, SalonDB
+
+
+@pytest.fixture
+def db():
+    database = SalonDB(":memory:", master_id=1)
+    database.update_master(slot_step_min=60)
+    service_id = database.add_service("Маникюр", 2000, 60)
+    for weekday in range(6):
+        database.set_schedule(weekday, True, "09:00", "18:00", "15:00", "15:30")
+    database.set_schedule(6, False)
+    yield database, service_id
+    database.close()
+
+
+def test_day_card_shows_booking_block_break_free_slots_and_revenue(db):
+    database, service_id = db
+    day = (datetime.now(LOCAL_TZ) + timedelta(days=1)).date()
+    start = datetime.combine(day, time(12), tzinfo=LOCAL_TZ)
+    client_id = database.upsert_client(100, "Анна", "+79990000000")
+    database.create_booking(client_id, service_id, start, now=start - timedelta(hours=3))
+    database.add_block(day, "14:00", "15:00", "Обед")
+    text = day_card(database, day)
+    assert "📅" in text
+    assert "1 запис" in text
+    assert "свободн" in text
+    assert "12:00 ━ 📱 Анна · Маникюр · 2 000 ₽" in text
+    assert "14:00 ━ 🚫 Обед" in text
+    assert "15:00 ━ 🍽 Перерыв" in text
+    assert "🟢" in text
+    assert text.endswith("Выручка по записи дня: 2 000 ₽")
+
+
+def test_day_navigation_and_week_schedule(db):
+    database, service_id = db
+    day = datetime.now(LOCAL_TZ).date()
+    keyboard = day_keyboard(database, day)
+    callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+    assert f"admin_day:{(day - timedelta(days=1)).isoformat()}" in callbacks
+    assert f"admin_day:{(day + timedelta(days=1)).isoformat()}" in callbacks
+    assert "admin_day_pick" in callbacks
+    text = week_schedule_text(database)
+    assert "Пн  09:00–18:00  🍽 15:00–15:30" in text
+    assert "Вс  выходной" in text

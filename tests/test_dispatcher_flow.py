@@ -80,4 +80,22 @@ async def test_real_dispatcher_completes_client_booking_flow(tmp_path):
     assert booking["start_at"] == start.isoformat(timespec="seconds")
     master_messages = [method for method in bot.methods if method.__api_method__ == "sendMessage" and method.chat_id == 1]
     assert len(master_messages) == 1
+
+    await dp.feed_update(
+        bot,
+        Update(update_id=9001, message=message(user_id, "📋 Мои записи")),
+        db=database,
+        master_id=1,
+    )
+    client_messages = [method for method in bot.methods if method.__api_method__ == "sendMessage" and method.chat_id == user_id]
+    assert any("Анна" in method.text and "Маникюр" in method.text for method in client_messages)
+
+    await dp.feed_update(
+        bot,
+        Update(update_id=9002, message=message(1, "📋 Записи")),
+        db=database,
+        master_id=1,
+    )
+    admin_messages = [method for method in bot.methods if method.__api_method__ == "sendMessage" and method.chat_id == 1]
+    assert any("Выручка по записи дня" in method.text for method in admin_messages)
     database.close()

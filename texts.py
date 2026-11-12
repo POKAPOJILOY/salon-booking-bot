@@ -94,3 +94,70 @@ ADMIN_SCHEDULE_DONE = "Расписание сохранено."
 ADMIN_SETTING_VALUE = "Введите новое числовое значение."
 ADMIN_SETTING_DONE = "Настройка сохранена."
 ADMIN_CLIENT_CANCELLED = "Мастер отменил вашу запись. Выберите другое время через /start."
+
+
+MASTER_BOOKINGS = "📋 Записи"
+MASTER_ADD = "➕ Добавить запись"
+MASTER_BLOCK = "🔒 Блок время"
+MASTER_SERVICES = "💅 Услуги"
+MASTER_SCHEDULE = "🕐 Расписание"
+MASTER_SETTINGS = "⚙️ Настройки"
+MASTER_LINK = "🔗 Моя ссылка"
+MASTER_STATS = "📊 Статистика"
+MASTER_DEMO = "🎬 Демо"
+CLIENT_BOOK = "📝 Записаться"
+CLIENT_BOOKINGS = "📋 Мои записи"
+CLIENT_NO_BOOKINGS = "У вас пока нет активных записей. Выберите удобное время — это займёт меньше минуты."
+CLIENT_MENU_HINT = "Выберите действие кнопками под полем ввода."
+NEXT_BOOKINGS_TODAY = "📋 Записи на сегодня"
+NEXT_ADD_ANOTHER = "➕ Ещё одна запись"
+NEXT_BLOCK = "🔒 Заблокировать время"
+NEXT_ALL_SERVICES = "💅 Все услуги"
+NEXT_LINK = "🔗 Моя ссылка"
+NEXT_SCHEDULE = "🕐 Расписание"
+NEXT_SETTINGS = "⚙️ Настройки"
+NEXT_STATS = "📊 Статистика"
+CANCEL_KEEP = "Оставить запись"
+CANCEL_CONFIRM_ADMIN = "Отменить запись {client} на {slot}? Клиент получит уведомление."
+WIDGET_SUBTITLE = "Выберите удобное время"
+WIDGET_NO_SLOTS = "Ближайшие две недели заняты — выберите «Другая дата» под сообщением."
+
+
+def money(value: int) -> str:
+    return f"{value:,} ₽".replace(",", " ")
+
+
+def done_text(action: str) -> str:
+    return f"✅ Готово: {action}.\nЧто дальше?"
+
+
+DAY_NONWORKING = "Выходной. Свободных окон для записи нет."
+WEEK_SCHEDULE_TITLE = "🕐 Моё расписание"
+DAY_PICK = "📅 Выбрать дату"
+DAY_REVENUE = "Выручка по записи дня: {amount}"
+
+
+def plural(value: int, one: str, few: str, many: str) -> str:
+    if 11 <= value % 100 <= 14:
+        return many
+    if value % 10 == 1:
+        return one
+    if 2 <= value % 10 <= 4:
+        return few
+    return many
+
+
+def day_title(day: date, today: date) -> str:
+    weekday = WEEKDAYS[day.weekday()].lower()
+    date_text = f"{weekday} {day.day} {MONTHS[day.month - 1]}"
+    if day == today:
+        return f"📅 Сегодня, {date_text}"
+    if day == today.fromordinal(today.toordinal() + 1):
+        return f"📅 Завтра, {date_text}"
+    return f"📅 {WEEKDAYS[day.weekday()]}, {day.day} {MONTHS[day.month - 1]}"
+
+
+def day_summary(booking_count: int, free_count: int) -> str:
+    booking_word = plural(booking_count, "запись", "записи", "записей")
+    free_word = plural(free_count, "свободное окно", "свободных окна", "свободных окон")
+    return f"{booking_count} {booking_word} · {free_count} {free_word}"

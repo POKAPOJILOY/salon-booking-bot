@@ -16,7 +16,7 @@ from notifications import notify_master
 class SendWidget(TelegramMethod[Message]):
     chat_id: int
     html: str
-    height: int = 480
+    height: int = 320
     chat_data: str
     caption: str
     allow_queries: bool = True
@@ -62,34 +62,47 @@ WIDGET_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>Свободное время</title>
 <style>
 :root{--target:24px}@media(pointer:coarse){:root{--target:44px}}
-main{font-family:inherit}h1{font-size:17px;margin:0 0 10px}h2{font-size:14px;color:var(--tg-theme-hint-color);margin:12px 0 5px}
-ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:7px}button{min-block-size:var(--target);min-inline-size:var(--target);padding:8px 13px;border:0;border-radius:9px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font:inherit;cursor:pointer}
-button:focus-visible{outline:3px solid var(--tg-theme-accent-text-color);outline-offset:2px}button:disabled{opacity:.55;cursor:default}
-#status{min-height:20px;color:var(--tg-theme-hint-color);font-size:13px;margin:10px 0 0}li{margin:0}
-</style></head><body><main><h1>Ближайшие свободные окна</h1><div id="slots"></div><p id="status" aria-live="polite"></p></main>
+main{font-family:inherit;color:var(--tg-theme-text-color,#17212B)}h1{font-size:17px;line-height:1.25;margin:0 0 4px}#subtitle{font-size:13px;color:var(--tg-theme-hint-color,#7A8A99);margin:0 0 12px}
+h2{font-size:14px;font-weight:700;margin:12px 0 6px}ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:7px}li{margin:0}
+button{min-block-size:var(--target);min-inline-size:var(--target);padding:7px 13px;border:1px solid transparent;border-radius:999px;background:var(--tg-theme-secondary-bg-color,#F1F3F5);color:var(--tg-theme-accent-text-color,#4F8FCC);font:inherit;font-weight:600;cursor:pointer}
+button:focus-visible{outline:3px solid var(--tg-theme-accent-text-color,#4F8FCC);outline-offset:2px}button:disabled{opacity:.5;cursor:default}
+button.selected{background:var(--tg-theme-button-color,#4F8FCC);color:var(--tg-theme-button-text-color,#FFFFFF);opacity:1}
+#status{min-height:20px;color:var(--tg-theme-hint-color,#7A8A99);font-size:13px;line-height:1.4;margin:12px 0 0}
+</style></head><body><main><h1 id="title"></h1><p id="subtitle"></p><div id="slots"></div><p id="status" aria-live="polite"></p></main>
 <script>
 const W=window.TelegramWidget,root=document.getElementById('slots'),status=document.getElementById('status');
 function draw(){
- root.innerHTML='';let data={};try{data=JSON.parse(W.chatData||'{}')}catch(e){}
- status.textContent=data.notice||'';let day='',list=null;
+ let data={};try{data=JSON.parse(W.chatData||'{}')}catch(e){}
+ document.getElementById('title').textContent=data.title||'Свободное время';
+ document.getElementById('subtitle').textContent=data.subtitle||'';
+ if(data.success){status.textContent='✅ Вы записаны: '+data.success;root.querySelectorAll('button').forEach(b=>b.disabled=true);return}
+ root.innerHTML='';status.textContent=data.notice||'';let day='',list=null;
  (data.slots||[]).forEach(slot=>{
   if(slot.d!==day){day=slot.d;let heading=document.createElement('h2');heading.textContent=day;root.appendChild(heading);list=document.createElement('ul');root.appendChild(list)}
   let item=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=slot.t;
   button.addEventListener('click',()=>{
-   root.querySelectorAll('button').forEach(b=>b.disabled=true);status.textContent='Проверяем время…';
+   root.querySelectorAll('button').forEach(b=>b.disabled=true);button.classList.add('selected');button.setAttribute('aria-pressed','true');
+   status.textContent='Проверяем время…';
    W.request('book:'+data.o+':'+slot.s).then(answer=>{
     let result={};try{result=JSON.parse(answer.result||'{}')}catch(e){}
-    if(result.status==='booked'){root.innerHTML='';status.textContent='Готово! Подтверждение отправлено ниже.';return}
-    if(result.status==='exists'){root.innerHTML='';status.textContent='У вас уже есть активная запись.';return}
+    if(result.status==='booked'){status.textContent='✅ Вы записаны: '+(result.label||slot.d+', '+slot.t);return}
+    if(result.status==='exists'){status.textContent='У вас уже есть активная запись.';return}
     status.textContent=result.status==='stale'?'Это время только что заняли, выберите другое':'Не удалось записаться. Попробуйте ещё раз.';
-    root.querySelectorAll('button').forEach(b=>b.disabled=false);
-   },error=>{status.textContent='Ошибка: '+error.code;root.querySelectorAll('button').forEach(b=>b.disabled=false)});
+    button.classList.remove('selected');button.removeAttribute('aria-pressed');root.querySelectorAll('button').forEach(b=>b.disabled=false);
+   },error=>{status.textContent='Ошибка: '+error.code;button.classList.remove('selected');button.removeAttribute('aria-pressed');root.querySelectorAll('button').forEach(b=>b.disabled=false)});
   });item.appendChild(button);list.appendChild(item);
  });
- if(!(data.slots||[]).length&&!data.notice)status.textContent='Свободных окон пока нет. Используйте кнопку ниже.';
+ if(!(data.slots||[]).length&&!data.notice)status.textContent='Ближайшие две недели заняты — выберите «Другая дата» под сообщением.';
 }
 W.onEvent('chatDataChanged',draw);draw();W.ready();
 </script></body></html>"""
+
+
+def widget_header(booking) -> dict:
+    return {
+        "title": f"{booking['service_name']} · {texts.money(booking['price'])}",
+        "subtitle": texts.WIDGET_SUBTITLE,
+    }
 
 
 def widget_state(db: SalonDB, booking, notice: str = "") -> str:
@@ -97,6 +110,7 @@ def widget_state(db: SalonDB, booking, notice: str = "") -> str:
     return json.dumps(
         {
             "o": booking["id"],
+            **widget_header(booking),
             "slots": [
                 {
                     "d": texts.format_day(local_time(slot.isoformat()).date()),
@@ -112,6 +126,12 @@ def widget_state(db: SalonDB, booking, notice: str = "") -> str:
     )
 
 
+def widget_height(db: SalonDB, booking) -> int:
+    slots = db.next_slots(booking["service_id"], limit=7, days=14)
+    days = {local_time(slot.isoformat()).date() for slot in slots}
+    return min(400, max(200, 145 + 55 * max(1, len(days))))
+
+
 async def send_reinvite_message(bot, db: SalonDB, booking) -> bool:
     caption = texts.reinvite_text(booking["client_name"], booking["reinvite_days"])
     fallback = reinvite_fallback(booking["id"])
@@ -120,6 +140,7 @@ async def send_reinvite_message(bot, db: SalonDB, booking) -> bool:
             await bot(SendWidget(
                 chat_id=booking["tg_id"],
                 html=WIDGET_HTML,
+                height=widget_height(db, booking),
                 chat_data=widget_state(db, booking),
                 caption=caption,
                 reply_markup=fallback,
@@ -136,10 +157,13 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
     if not query:
         return UNHANDLED
 
-    async def answer(status: str) -> None:
+    async def answer(status: str, label: str | None = None) -> None:
+        payload = {"status": status}
+        if label:
+            payload["label"] = label
         await bot(AnswerWidgetQuery(
             widget_query_id=query["id"],
-            data=json.dumps({"status": status}, separators=(",", ":")),
+            data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         ))
 
     try:
@@ -170,11 +194,15 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
             old["client_id"], old["service_id"], start,
             source="reinvite", reinvited_from_id=old["id"],
         )
-        await answer("booked")
+        local = local_time(start.isoformat())
+        label = f"{texts.format_day(local.date())}, {local:%H:%M}"
+        await answer("booked", label)
         try:
             await bot(EditMessageWidgetData(
                 chat_id=query["chat"]["id"], message_id=query["message_id"],
-                chat_data=json.dumps({"o": old["id"], "slots": [], "notice": "Запись подтверждена"}),
+                chat_data=json.dumps({
+                    "o": old["id"], **widget_header(old), "slots": [], "success": label,
+                }, ensure_ascii=False, separators=(",", ":")),
             ))
         except Exception:
             logging.exception("Не удалось обновить виджет после записи %s", booking_id)
