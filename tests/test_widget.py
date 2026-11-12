@@ -104,6 +104,12 @@ async def test_double_widget_tap_creates_only_one_reinvite(db):
     answers = [method for method in bot.methods if method.__api_method__ == "answerWidgetQuery"]
     assert json.loads(answers[0].data)["status"] == "booked"
     assert json.loads(answers[1].data)["status"] == "exists"
+    edit = next(method for method in bot.methods if method.__api_method__ == "editMessageWidgetData")
+    success = json.loads(edit.chat_data)
+    assert "title" not in success and "subtitle" not in success
+    assert success["service"] == "Маникюр"
+    assert success["price"] == 2000
+    assert success["success"]
 
 
 @pytest.mark.asyncio

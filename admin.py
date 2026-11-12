@@ -3,8 +3,9 @@ import re
 from datetime import date, datetime, time
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import BaseFilter, Command, CommandStart
+from aiogram.methods import DeleteMessage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -13,8 +14,9 @@ import texts
 from client import valid_name, valid_phone
 from database import LOCAL_TZ, SalonDB, SlotUnavailable, utc_now
 from demo import run_demo_scenario
+from day_widget import send_day_widget
 from keyboards import inline_keyboard, master_reply_menu, next_step_keyboard
-from views import bookings_for_day, day_card, day_keyboard, week_schedule_text
+from views import day_card, day_keyboard, week_schedule_keyboard, week_schedule_text
 
 router = Router()
 
@@ -138,7 +140,22 @@ def stats_text(db: SalonDB) -> str:
     return "\n".join(lines)
 
 
-async def show_day(event, db: SalonDB, day: date) -> None:
+async def show_day(event, db: SalonDB, day: date, bot) -> None:
+    if isinstance(event, Message):
+        await send_day_widget(bot, db, day, event.from_user.id)
+        return
+    if getattr(event.message, "widget", None):
+        try:
+            await send_day_widget(bot, db, day, event.from_user.id, fallback=False)
+            await bot(DeleteMessage(
+                chat_id=event.message.chat.id, message_id=event.message.message_id
+            ))
+        except TelegramBadRequest:
+            await present(event, day_card(db, day), day_keyboard(db, day))
+        except Exception:
+            logging.exception("Не удалось заменить виджет дня")
+            await present(event, day_card(db, day), day_keyboard(db, day))
+        return
     await present(event, day_card(db, day), day_keyboard(db, day))
 
 
@@ -173,16 +190,16 @@ async def my_link(event, bot, db: SalonDB) -> None:
 
 @router.callback_query(F.data == "admin_bookings")
 @router.message(F.text == texts.MASTER_BOOKINGS)
-async def bookings(event, db: SalonDB) -> None:
+async def bookings(event, db: SalonDB, bot) -> None:
     day = utc_now().astimezone(LOCAL_TZ).date()
-    await show_day(event, db, day)
+    await show_day(event, db, day, bot)
     await acknowledge(event)
 
 
 @router.callback_query(F.data.startswith("admin_day:"))
-async def day_navigation(callback: CallbackQuery, db: SalonDB) -> None:
+async def day_navigation(callback: CallbackQuery, db: SalonDB, bot) -> None:
     day = date.fromisoformat(callback.data.split(":")[1])
-    await show_day(callback, db, day)
+    await show_day(callback, db, day, bot)
     await callback.answer()
 
 
@@ -194,14 +211,14 @@ async def day_pick(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(DayPickStates.day)
-async def day_picked(message: Message, state: FSMContext, db: SalonDB) -> None:
+async def day_picked(message: Message, state: FSMContext, db: SalonDB, bot) -> None:
     try:
         day = parse_day(message.text or "")
     except ValueError:
         await message.answer(texts.ADMIN_INVALID_DATE)
         return
     await state.clear()
-    await show_day(message, db, day)
+    await show_day(message, db, day, bot)
 
 
 @router.callback_query(F.data.startswith("admin_cancel:"))
@@ -217,18 +234,18 @@ async def admin_cancel(callback: CallbackQuery, db: SalonDB) -> None:
     question = texts.CANCEL_CONFIRM_ADMIN.format(
         client=booking["client_name"], slot=texts.format_slot(booking["start_at"])
     )
-    await callback.message.edit_text(question, reply_markup=keyboard)
+    await callback.message.answer(question, reply_markup=keyboard)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("admin_cancel_no:"))
-async def admin_cancel_no(callback: CallbackQuery, db: SalonDB) -> None:
-    await show_day(callback, db, date.fromisoformat(callback.data.split(":")[1]))
+async def admin_cancel_no(callback: CallbackQuery, db: SalonDB, bot) -> None:
+    await show_day(callback, db, date.fromisoformat(callback.data.split(":")[1]), bot)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("admin_cancel_yes:"))
-async def admin_cancel_yes(callback: CallbackQuery, db: SalonDB, bot) -> None:
+async def admin_cancel_yes(callback: CallbackQuery, db: SalonDB, bot, master_id: int) -> None:
     try:
         booking = db.cancel_booking(int(callback.data.split(":")[1]))
     except ValueError:
@@ -240,9 +257,10 @@ async def admin_cancel_yes(callback: CallbackQuery, db: SalonDB, bot) -> None:
         except TelegramAPIError:
             logging.exception("Не удалось уведомить клиента об отмене")
     action = f"запись отменена: {booking['client_name']}, {texts.format_slot(booking['start_at'])}"
-    await callback.message.edit_text(
+    await callback.message.answer(
         texts.done_text(action), reply_markup=next_step_keyboard("cancel")
     )
+    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
     await callback.answer()
 
 
@@ -300,7 +318,7 @@ async def manual_name(message: Message, state: FSMContext) -> None:
 
 
 @router.message(ManualStates.phone)
-async def manual_phone(message: Message, state: FSMContext, db: SalonDB) -> None:
+async def manual_phone(message: Message, state: FSMContext, db: SalonDB, bot, master_id: int) -> None:
     if not valid_phone(message.text or ""):
         await message.answer(texts.INVALID_PHONE)
         return
@@ -317,6 +335,7 @@ async def manual_phone(message: Message, state: FSMContext, db: SalonDB) -> None
     booking = db.get_booking(booking_id)
     action = f"запись создана: {booking['client_name']}, {booking['service_name']}, {texts.format_slot(booking['start_at'])}"
     await message.answer(texts.done_text(action), reply_markup=next_step_keyboard("booking"))
+    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
 
 
 @router.callback_query(F.data == "admin_block")
@@ -352,7 +371,7 @@ async def block_interval(message: Message, state: FSMContext) -> None:
 
 
 @router.message(BlockStates.reason)
-async def block_reason(message: Message, state: FSMContext, db: SalonDB) -> None:
+async def block_reason(message: Message, state: FSMContext, db: SalonDB, bot, master_id: int) -> None:
     data = await state.get_data()
     reason = (message.text or "").strip()
     db.add_block(
@@ -362,6 +381,7 @@ async def block_reason(message: Message, state: FSMContext, db: SalonDB) -> None
     await state.clear()
     action = f"время заблокировано: {texts.format_day(date.fromisoformat(data['day']))}, {data['start_time']}–{data['end_time']}"
     await message.answer(texts.done_text(action), reply_markup=next_step_keyboard("block"))
+    await send_day_widget(bot, db, date.fromisoformat(data["day"]), master_id)
 
 
 @router.callback_query(F.data == "admin_services")
@@ -448,11 +468,7 @@ async def service_duration(message: Message, state: FSMContext, db: SalonDB) -> 
 @router.callback_query(F.data == "admin_schedule")
 @router.message(F.text == texts.MASTER_SCHEDULE)
 async def schedule(event, db: SalonDB) -> None:
-    keyboard = inline_keyboard([
-        ("✏️ Изменить день", "schedule_edit"),
-        ("← Меню", "admin_menu"),
-    ])
-    await present(event, week_schedule_text(db), keyboard)
+    await present(event, week_schedule_text(db), week_schedule_keyboard())
     await acknowledge(event)
 
 
@@ -467,6 +483,7 @@ async def schedule_edit(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("schedule_weekday:"))
+@router.callback_query(F.data.startswith("admin_edit_day:"))
 async def schedule_weekday(callback: CallbackQuery, state: FSMContext) -> None:
     weekday = int(callback.data.split(":")[1])
     names = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")

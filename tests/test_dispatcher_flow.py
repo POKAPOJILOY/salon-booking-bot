@@ -96,6 +96,6 @@ async def test_real_dispatcher_completes_client_booking_flow(tmp_path):
         db=database,
         master_id=1,
     )
-    admin_messages = [method for method in bot.methods if method.__api_method__ == "sendMessage" and method.chat_id == 1]
-    assert any("Выручка по записи дня" in method.text for method in admin_messages)
+    day_widgets = [method for method in bot.methods if method.__api_method__ == "sendWidget" and method.chat_id == 1]
+    assert any("Выручка по записи" in method.caption for method in day_widgets)
     database.close()

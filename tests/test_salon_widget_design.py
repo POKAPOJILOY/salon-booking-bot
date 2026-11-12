@@ -17,6 +17,9 @@ def test_salon_widget_has_both_themes_decor_and_compact_accessible_chips():
     assert "Вы записаны!" in WIDGET_HTML
     assert "leaving" in WIDGET_HTML
     assert "prefers-reduced-motion:reduce" in WIDGET_HTML
+    assert "getElementById('title').hidden=true" in WIDGET_HTML
+    assert "getElementById('subtitle').hidden=true" in WIDGET_HTML
+    assert "success-service" in WIDGET_HTML
 
 
 def test_salon_widget_still_fits_compressed_telegram_limit():

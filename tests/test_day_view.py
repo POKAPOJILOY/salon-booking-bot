@@ -45,5 +45,5 @@ def test_day_navigation_and_week_schedule(db):
     assert f"admin_day:{(day + timedelta(days=1)).isoformat()}" in callbacks
     assert "admin_day_pick" in callbacks
     text = week_schedule_text(database)
-    assert "Пн  09:00–18:00  🍽 15:00–15:30" in text
-    assert "Вс  выходной" in text
+    assert "Пн–Сб — 09:00–18:00 · перерыв 15:00–15:30" in text
+    assert "Вс — выходной" in text

@@ -1,5 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
+from aiogram.types import InlineKeyboardButton
+
 import texts
 from database import LOCAL_TZ, SalonDB, db_time, local_time, utc_now
 from keyboards import inline_keyboard
@@ -21,6 +23,53 @@ def bookings_for_day(db: SalonDB, day: date):
         """,
         (db.master_id, db_time(start), db_time(end)),
     ).fetchall()
+
+
+def free_slots_for_day(db: SalonDB, day: date, now: datetime | None = None) -> list[datetime]:
+    now = now or utc_now()
+    master = db.get_master()
+    schedule = db.conn.execute(
+        "SELECT * FROM schedules WHERE master_id = ? AND weekday = ?",
+        (db.master_id, day.weekday()),
+    ).fetchone()
+    if not schedule or not schedule["is_working"]:
+        return []
+    bookings = bookings_for_day(db, day)
+    booking_intervals = [(local_time(row["start_at"]), local_time(row["end_at"])) for row in bookings]
+    blocks = db.conn.execute(
+        "SELECT * FROM blocks WHERE master_id = ? AND date = ?",
+        (db.master_id, day.isoformat()),
+    ).fetchall()
+    block_intervals = [
+        (
+            datetime.combine(day, time.fromisoformat(row["start_time"]), LOCAL_TZ),
+            datetime.combine(day, time.fromisoformat(row["end_time"]), LOCAL_TZ),
+        )
+        for row in blocks
+    ]
+    break_interval = None
+    if schedule["break_start"] and schedule["break_end"]:
+        break_interval = (
+            datetime.combine(day, time.fromisoformat(schedule["break_start"]), LOCAL_TZ),
+            datetime.combine(day, time.fromisoformat(schedule["break_end"]), LOCAL_TZ),
+        )
+    candidate = datetime.combine(day, time.fromisoformat(schedule["work_start"]), LOCAL_TZ)
+    work_end = datetime.combine(day, time.fromisoformat(schedule["work_end"]), LOCAL_TZ)
+    step = timedelta(minutes=master["slot_step_min"])
+    result = []
+    while candidate < work_end:
+        candidate_end = candidate + step
+        overlaps_booking = any(candidate < end and start < candidate_end for start, end in booking_intervals)
+        overlaps_block = any(candidate < end and start < candidate_end for start, end in block_intervals)
+        overlaps_break = break_interval and candidate < break_interval[1] and break_interval[0] < candidate_end
+        if (
+            candidate_end <= work_end
+            and candidate >= now + timedelta(hours=master["min_notice_hours"])
+            and not overlaps_booking and not overlaps_block and not overlaps_break
+        ):
+            result.append(candidate)
+        candidate += step
+    return result
 
 
 def day_card(db: SalonDB, day: date, now: datetime | None = None) -> str:
@@ -53,7 +102,7 @@ def day_card(db: SalonDB, day: date, now: datetime | None = None) -> str:
             datetime.combine(day, time.fromisoformat(schedule["break_end"]), LOCAL_TZ),
         )
 
-    free_slots = []
+    free_slots = free_slots_for_day(db, day, now)
     timeline = []
     if not schedule or not schedule["is_working"]:
         timeline.append(texts.DAY_NONWORKING)
@@ -74,8 +123,6 @@ def day_card(db: SalonDB, day: date, now: datetime | None = None) -> str:
                 and candidate >= now + timedelta(hours=master["min_notice_hours"])
                 and not overlaps_booking and not overlaps_block and not overlaps_break
             )
-            if is_free:
-                free_slots.append(candidate)
             label = f"{candidate:%H:%M} ━"
             if booking:
                 icon = "📞" if booking["source"] == "manual" else ("🔁" if booking["source"] == "reinvite" else "📱")
@@ -113,8 +160,6 @@ def day_keyboard(db: SalonDB, day: date):
         ("Сегодня", f"admin_day:{today.isoformat()}"),
         ("Завтра ➡", f"admin_day:{(day + timedelta(days=1)).isoformat()}"),
     ], columns=3)
-    from aiogram.types import InlineKeyboardButton
-
     keyboard.inline_keyboard.append([
         InlineKeyboardButton(text=texts.DAY_PICK, callback_data="admin_day_pick")
     ])
@@ -129,18 +174,47 @@ def day_keyboard(db: SalonDB, day: date):
     return keyboard
 
 
-def week_schedule_text(db: SalonDB) -> str:
+def week_schedule_text(db: SalonDB, today: date | None = None) -> str:
     schedules = {row["weekday"]: row for row in db.get_schedules()}
-    lines = [texts.WEEK_SCHEDULE_TITLE, ""]
-    for weekday, name in enumerate(texts.WEEKDAYS):
+    groups = []
+    for weekday in range(7):
         row = schedules.get(weekday)
         if not row:
-            value = "не настроено"
+            signature = ("unset",)
         elif not row["is_working"]:
+            signature = ("off",)
+        else:
+            signature = (
+                "working", row["work_start"], row["work_end"],
+                row["break_start"], row["break_end"],
+            )
+        if groups and groups[-1][0] == signature:
+            groups[-1][2] = weekday
+        else:
+            groups.append([signature, weekday, weekday])
+    today = today or utc_now().astimezone(LOCAL_TZ).date()
+    lines = [texts.WEEK_SCHEDULE_TITLE, ""]
+    for signature, first, last in groups:
+        label = texts.WEEKDAYS[first] if first == last else f"{texts.WEEKDAYS[first]}–{texts.WEEKDAYS[last]}"
+        if signature[0] == "unset":
+            value = "не настроено"
+        elif signature[0] == "off":
             value = "выходной"
         else:
-            value = f"{row['work_start']}–{row['work_end']}"
-            if row["break_start"] and row["break_end"]:
-                value += f"  🍽 {row['break_start']}–{row['break_end']}"
-        lines.append(f"{name}  {value}")
+            value = f"{signature[1]}–{signature[2]}"
+            if signature[3] and signature[4]:
+                value += f" · перерыв {signature[3]}–{signature[4]}"
+        marker = "   ← сегодня" if first <= today.weekday() <= last else ""
+        lines.append(f"{label} — {value}{marker}")
     return "\n".join(lines)
+
+
+def week_schedule_keyboard():
+    keyboard = inline_keyboard([
+        (name, f"admin_edit_day:{weekday}")
+        for weekday, name in enumerate(texts.WEEKDAYS)
+    ], columns=7)
+    keyboard.inline_keyboard.append([
+        InlineKeyboardButton(text="← Меню", callback_data="admin_menu")
+    ])
+    return keyboard

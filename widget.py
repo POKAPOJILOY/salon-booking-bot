@@ -73,14 +73,19 @@ button{min-block-size:var(--target);min-inline-size:var(--target);padding:8px 15
 button:focus-visible{outline:3px solid var(--salon-accent);outline-offset:2px}button:disabled{opacity:.5;cursor:default}button.selected{background:var(--salon-selected);color:var(--salon-selected-text);opacity:1;transform:scale(1.04)}
 button.leaving{opacity:0;transform:scale(.85)}@media(hover:hover){button:hover{transform:translateY(-1px)}}
 #status{min-height:20px;color:var(--salon-muted);font-size:13px;line-height:1.4;margin:12px 0 0}.trust{font-size:12px;color:var(--salon-muted);margin:14px 0 0;padding-top:10px;border-top:1px solid rgba(139,106,120,.18)}
-#success{text-align:center;padding:18px 4px 8px}.success-icon{font-size:36px}.success-title{font-size:20px;font-weight:700;margin:5px 0}#success-details{font-size:15px;margin:0}#success-note{font-size:12px;color:var(--salon-muted);margin:7px 0 0}
+#success{text-align:center;padding:32px 4px 18px}.success-icon{font-size:42px}.success-title{font-size:20px;font-weight:700;margin:5px 0}#success-details{font-size:15px;margin:0}#success-note{font-size:12px;color:var(--salon-muted);margin:7px 0 0}#success-service{margin:18px 0 0;padding-top:12px;border-top:1px solid rgba(139,106,120,.18);font-weight:600}
 @media(prefers-reduced-motion:reduce){button{transition-duration:.01s}}
-</style></head><body><main><h1 id="headline">💅 Пора обновить маникюр! ✨</h1><p id="title"></p><p id="subtitle"></p><div id="slots"></div><p id="status" aria-live="polite"></p><div id="success" hidden><div class="success-icon">💅</div><div class="success-title">Вы записаны!</div><p id="success-details"></p><p id="success-note">Напомним за 24 часа</p></div><p class="trust">Перенос и отмена — в один тап</p></main>
+</style></head><body><main><h1 id="headline">💅 Пора обновить маникюр! ✨</h1><p id="title"></p><p id="subtitle"></p><div id="slots"></div><p id="status" aria-live="polite"></p><div id="success" hidden><div class="success-icon">💅</div><div class="success-title">Вы записаны!</div><p id="success-details"></p><p id="success-note">Напомним за 24 часа</p><p id="success-service"></p></div><p class="trust">Перенос и отмена — в один тап</p></main>
 <script>
 const W=window.TelegramWidget,root=document.getElementById('slots'),status=document.getElementById('status');
-function showSuccess(label){root.hidden=true;status.hidden=true;document.getElementById('success').hidden=false;document.getElementById('success-details').textContent=label}
+function showSuccess(label){
+ root.hidden=true;status.hidden=true;document.getElementById('title').hidden=true;document.getElementById('subtitle').hidden=true;document.getElementById('headline').hidden=true;
+ let data={};try{data=JSON.parse(W.chatData||'{}')}catch(e){}
+ document.getElementById('success').hidden=false;document.getElementById('success-details').textContent=label;
+ document.getElementById('success-service').textContent=(data.service||'')+' · '+String(data.price||'').replace(/\\B(?=([0-9]{3})+(?![0-9]))/g,' ')+' ₽';
+}
 function render(data){
- root.hidden=false;status.hidden=false;document.getElementById('success').hidden=true;status.textContent=data.notice||'';let day='',list=null;
+ root.hidden=false;status.hidden=false;document.getElementById('title').hidden=false;document.getElementById('subtitle').hidden=false;document.getElementById('headline').hidden=false;document.getElementById('success').hidden=true;status.textContent=data.notice||'';let day='',list=null;
  (data.slots||[]).forEach(slot=>{
   if(slot.d!==day){day=slot.d;let heading=document.createElement('h2');heading.textContent=day;root.appendChild(heading);list=document.createElement('ul');root.appendChild(list)}
   let item=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=slot.t;button.setAttribute('data-slot',slot.s);
@@ -179,6 +184,11 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
             data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         ))
 
+    if query["data"].startswith("open:"):
+        from day_widget import handle_day_open
+
+        return await handle_day_open(query, bot, db, master_id, answer)
+
     try:
         action, old_id, start_text = query["data"].split(":", 2)
         old = db.get_booking(int(old_id))
@@ -214,7 +224,8 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
             await bot(EditMessageWidgetData(
                 chat_id=query["chat"]["id"], message_id=query["message_id"],
                 chat_data=json.dumps({
-                    "o": old["id"], **widget_header(old), "slots": [], "success": label,
+                    "o": old["id"], "success": label,
+                    "service": old["service_name"], "price": old["price"],
                 }, ensure_ascii=False, separators=(",", ":")),
             ))
         except Exception:
@@ -224,6 +235,9 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
             booking["tg_id"], texts.confirmation(booking), reply_markup=booking_actions(booking_id)
         )
         await notify_master(bot, master_id, booking)
+        from day_widget import send_day_widget
+
+        await send_day_widget(bot, db, local.date(), master_id)
         return True
     except (SlotUnavailable, ValueError, KeyError):
         try:

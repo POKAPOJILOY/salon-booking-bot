@@ -21,8 +21,13 @@ from keyboards import (
     times_keyboard,
 )
 from notifications import notify_master
+from day_widget import send_day_widget
 
 router = Router()
+
+
+async def refresh_master_day(bot, db: SalonDB, master_id: int, booking) -> None:
+    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
 
 
 @router.message.middleware()
@@ -208,6 +213,7 @@ async def choose_time(callback: CallbackQuery, state: FSMContext, db: SalonDB, b
         text = f"{texts.done_text('запись перенесена')}\n\n{texts.booking_card(booking)}"
         await callback.message.edit_text(text, reply_markup=booking_actions(new_id))
         await notify_master(bot, master_id, booking, "Запись перенесена")
+        await refresh_master_day(bot, db, master_id, booking)
         await callback.answer()
         return
     if data.get("name") and data.get("phone"):
@@ -263,6 +269,7 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext, db: SalonD
     text = f"{texts.done_text('запись создана')}\n\n{texts.booking_card(booking)}"
     await callback.message.edit_text(text, reply_markup=booking_actions(booking_id))
     await notify_master(bot, master_id, booking)
+    await refresh_master_day(bot, db, master_id, booking)
     await callback.answer()
 
 
@@ -330,6 +337,7 @@ async def cancel_yes(callback: CallbackQuery, db: SalonDB, bot, master_id: int) 
         texts.done_text("запись отменена"), reply_markup=next_step_keyboard("client")
     )
     await notify_master(bot, master_id, booking, "Запись отменена")
+    await refresh_master_day(bot, db, master_id, booking)
     await callback.answer()
 
 

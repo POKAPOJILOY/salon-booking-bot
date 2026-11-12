@@ -49,7 +49,13 @@ async def test_confirmation_creates_booking_and_notifies_master(db):
         "reinvited_from_id": None,
     })
     query = callback("confirm")
-    bot = SimpleNamespace(send_message=AsyncMock())
+    class Bot:
+        send_message = AsyncMock()
+
+        async def __call__(self, method):
+            return True
+
+    bot = Bot()
     await confirm_booking(query, state, database, bot, 1)
     booking = database.get_booking(database.conn.execute("SELECT id FROM bookings").fetchone()[0])
     assert booking["source"] == "link"
