@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram booking bot for one private master
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=salon
+Group=salon
+WorkingDirectory=/opt/salon-booking-bot
+EnvironmentFile=/opt/salon-booking-bot/.env
+ExecStart=/opt/salon-booking-bot/.venv/bin/python /opt/salon-booking-bot/bot.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
