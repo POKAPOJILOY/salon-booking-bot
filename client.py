@@ -2,6 +2,7 @@ import re
 from datetime import date, datetime
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -51,23 +52,33 @@ def valid_phone(value: str) -> bool:
     return 10 <= len(re.sub(r"\D", "", value)) <= 15
 
 
+async def answer_or_edit(message, text: str, reply_markup, new_message: bool = False) -> None:
+    if new_message:
+        await message.answer(text, reply_markup=reply_markup)
+        return
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:
+        await message.answer(text, reply_markup=reply_markup)
+
+
 async def show_services(message, state: FSMContext, db: SalonDB, edit: bool = False) -> None:
     await state.set_state(BookingStates.service)
     keyboard = services_keyboard(db)
     if edit:
-        await message.edit_text(texts.CHOOSE_SERVICE, reply_markup=keyboard)
+        await answer_or_edit(message, texts.CHOOSE_SERVICE, keyboard)
     else:
         await message.answer(texts.CHOOSE_SERVICE, reply_markup=keyboard)
 
 
-async def show_dates(message, state: FSMContext, db: SalonDB) -> None:
+async def show_dates(message, state: FSMContext, db: SalonDB, new_message: bool = False) -> None:
     data = await state.get_data()
     keyboard = dates_keyboard(db, data["service_id"])
     await state.set_state(BookingStates.day)
     if not keyboard.inline_keyboard:
-        await message.edit_text(texts.NO_DATES, reply_markup=services_keyboard(db))
+        await answer_or_edit(message, texts.NO_DATES, services_keyboard(db), new_message)
         return
-    await message.edit_text(texts.CHOOSE_DATE, reply_markup=keyboard)
+    await answer_or_edit(message, texts.CHOOSE_DATE, keyboard, new_message)
 
 
 async def show_confirmation(message, state: FSMContext, db: SalonDB) -> None:
@@ -86,7 +97,7 @@ async def show_confirmation(message, state: FSMContext, db: SalonDB) -> None:
     if isinstance(message, Message):
         await message.answer(text, reply_markup=keyboard)
     else:
-        await message.edit_text(text, reply_markup=keyboard)
+        await answer_or_edit(message, text, keyboard)
 
 
 @router.message(CommandStart())
@@ -332,7 +343,7 @@ async def start_reinvite(callback: CallbackQuery, state: FSMContext, db: SalonDB
     active = db.active_booking_for_client(old["client_id"])
     if active:
         booking = db.get_booking(active["id"])
-        await callback.message.edit_text(
+        await callback.message.answer(
             texts.confirmation(booking), reply_markup=booking_actions(booking["id"])
         )
         await callback.answer()
@@ -346,9 +357,9 @@ async def start_reinvite(callback: CallbackQuery, state: FSMContext, db: SalonDB
         "reinvited_from_id": old_id,
     })
     if not old["is_active"]:
-        await show_services(callback.message, state, db, edit=True)
+        await show_services(callback.message, state, db)
     else:
-        await show_dates(callback.message, state, db)
+        await show_dates(callback.message, state, db, new_message=True)
     await callback.answer()
 
 
@@ -359,7 +370,7 @@ async def opt_out(callback: CallbackQuery, db: SalonDB) -> None:
         await callback.answer(texts.BOOKING_NOT_FOUND, show_alert=True)
         return
     db.set_reinvite_opt_out(booking["client_id"])
-    await callback.message.edit_text(
+    await callback.message.answer(
         texts.done_text("повторные приглашения отключены"),
         reply_markup=next_step_keyboard("client"),
     )

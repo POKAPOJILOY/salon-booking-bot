@@ -77,4 +77,5 @@ async def test_reinvite_skips_service_and_reuses_saved_client(db):
     assert data["phone"] == "+79990000000"
     assert data["source"] == "reinvite"
     assert data["reinvited_from_id"] == old_id
-    query.message.edit_text.assert_awaited_once()
+    query.message.answer.assert_awaited_once()
+    query.message.edit_text.assert_not_called()

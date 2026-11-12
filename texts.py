@@ -161,3 +161,6 @@ def day_summary(booking_count: int, free_count: int) -> str:
     booking_word = plural(booking_count, "запись", "записи", "записей")
     free_word = plural(free_count, "свободное окно", "свободных окна", "свободных окон")
     return f"{booking_count} {booking_word} · {free_count} {free_word}"
+
+
+WIDGET_HEADLINE = "💅 Пора обновить маникюр! ✨"
