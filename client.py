@@ -1,5 +1,6 @@
 import re
 from datetime import date, datetime
+from functools import wraps
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -30,11 +31,18 @@ async def refresh_master_day(bot, db: SalonDB, master_id: int, booking) -> None:
     await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
 
 
-@router.message.middleware()
-async def reset_reply_menu_state(handler, message: Message, data):
-    if message.text in {texts.CLIENT_BOOK, texts.CLIENT_BOOKINGS}:
-        await data["state"].clear()
-    return await handler(message, data)
+def menu_interruptible(handler):
+    @wraps(handler)
+    async def wrapper(message, state, *args, **kwargs):
+        db = kwargs.get("db") or (args[0] if args and isinstance(args[0], SalonDB) else None)
+        text = getattr(message, "text", None)
+        if text in {texts.CLIENT_BOOK, texts.CLIENT_BOOKINGS} and db is not None and await state.get_state() is not None:
+            await state.clear()
+            if text == texts.CLIENT_BOOK:
+                return await show_services(message, state, db)
+            return await my_bookings(message, db)
+        return await handler(message, state, *args, **kwargs)
+    return wrapper
 
 
 class BookingStates(StatesGroup):
@@ -105,6 +113,7 @@ async def show_confirmation(message, state: FSMContext, db: SalonDB) -> None:
         await answer_or_edit(message, text, keyboard)
 
 
+@menu_interruptible
 @router.message(CommandStart())
 async def client_start(message: Message, state: FSMContext, db: SalonDB, master_id: int) -> None:
     if message.from_user.id == master_id:
@@ -116,6 +125,7 @@ async def client_start(message: Message, state: FSMContext, db: SalonDB, master_
     )
 
 
+@menu_interruptible
 @router.message(F.text == texts.CLIENT_BOOK)
 async def start_booking_message(message: Message, state: FSMContext, db: SalonDB) -> None:
     await state.clear()
@@ -129,6 +139,7 @@ async def start_booking(callback: CallbackQuery, state: FSMContext, db: SalonDB)
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(F.text == texts.CLIENT_BOOKINGS)
 @router.callback_query(F.data == "client_bookings")
 async def my_bookings(event, db: SalonDB) -> None:
@@ -224,6 +235,7 @@ async def choose_time(callback: CallbackQuery, state: FSMContext, db: SalonDB, b
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(BookingStates.name)
 async def save_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
@@ -235,6 +247,7 @@ async def save_name(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ASK_PHONE, reply_markup=phone_keyboard())
 
 
+@menu_interruptible
 @router.message(BookingStates.phone)
 async def save_phone(message: Message, state: FSMContext, db: SalonDB) -> None:
     phone = message.contact.phone_number if message.contact else (message.text or "").strip()

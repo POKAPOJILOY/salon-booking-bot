@@ -8,6 +8,7 @@ from config import DB_PATH, MASTER_ID, TZ
 
 LOCAL_TZ = TZ
 UTC = timezone.utc
+INVITE_AFTER_DAYS = 21
 
 
 class SlotUnavailable(ValueError):
@@ -50,11 +51,11 @@ class SalonDB:
 
     def _create_schema(self) -> None:
         self.conn.executescript(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS masters (
                 tg_id INTEGER PRIMARY KEY,
                 username TEXT,
-                reinvite_days INTEGER NOT NULL DEFAULT 21,
+                reinvite_days INTEGER NOT NULL DEFAULT {INVITE_AFTER_DAYS},
                 min_notice_hours INTEGER NOT NULL DEFAULT 2,
                 slot_step_min INTEGER NOT NULL DEFAULT 30,
                 demo_mode INTEGER NOT NULL DEFAULT 0,

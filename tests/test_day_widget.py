@@ -36,6 +36,8 @@ def db():
 
 def seed_day(database, service_id):
     day = (datetime.now(LOCAL_TZ) + timedelta(days=1)).date()
+    while day.weekday() == 6:
+        day += timedelta(days=1)
     start = datetime.combine(day, time(10), tzinfo=LOCAL_TZ)
     client_id = database.upsert_client(100, "Анна", "+79990000000")
     booking_id = database.create_booking(client_id, service_id, start, now=start - timedelta(hours=3))
@@ -50,22 +52,22 @@ def test_day_widget_state_sorts_items_compresses_free_time_and_calculates_revenu
     assert state["d"] == day.isoformat()
     assert "1 запис" in state["summary"]
     assert state["revenue"] == "Выручка по записи: 2 000 ₽"
-    starts = [item.get("start", "00:00") for item in state["items"]]
+    starts = [item.get("s", "00:00") for item in state["items"]]
     assert starts == sorted(starts)
-    booking = next(item for item in state["items"] if item["type"] == "booking")
-    assert booking["id"] == booking_id and booking["past"] is False
-    free = next(item for item in state["items"] if item["type"] == "free" and item["start"] == "11:00")
-    assert free["end"] == "15:00"
-    assert all(not (item["type"] == "free" and item["start"] == item["end"]) for item in state["items"])
+    booking = next(item for item in state["items"] if item["t"] == "b")
+    assert booking["i"] == booking_id and booking["pst"] is False
+    free = next(item for item in state["items"] if item["t"] == "f" and item["s"] == "11:00")
+    assert free["e"] == "15:00"
+    assert all(not (item["t"] == "f" and item["s"] == item["e"]) for item in state["items"])
     later = json.loads(day_widget_state(database, day, now=start + timedelta(hours=2)))
-    assert next(item for item in later["items"] if item["type"] == "booking")["past"] is True
+    assert next(item for item in later["items"] if item["t"] == "b")["pst"] is True
 
 
 def test_day_widget_state_closed_day(db):
     database, service_id = db
     sunday = date(2026, 11, 15)
     state = json.loads(day_widget_state(database, sunday))
-    assert state["items"] == [{"type": "closed"}]
+    assert state["items"] == [{"t": "c"}]
 
 
 @pytest.mark.asyncio

@@ -60,14 +60,14 @@ def callback(data="confirm"):
 
 
 @pytest.mark.asyncio
-async def test_client_booking_edits_open_day_and_caption_is_static(db):
+async def test_client_booking_edits_open_day_and_caption_has_summary(db):
     database, service_id = db
     start = next_day_start(database, service_id)
     day = start.astimezone(LOCAL_TZ).date()
     bot = FakeBot()
     assert await send_day_widget(bot, database, day, 1)
     initial = next(method for method in bot.methods if method.__api_method__ == "sendWidget")
-    assert "Выручка" not in initial.caption
+    assert "0 запис" in initial.caption and "0 ₽" in initial.caption
     assert initial.caption.startswith("📅 Расписание · ")
     state = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=100, user_id=100))
     await state.set_data({
@@ -78,7 +78,7 @@ async def test_client_booking_edits_open_day_and_caption_is_static(db):
     edit = next(method for method in bot.methods if method.__api_method__ == "editMessageWidgetData")
     state = json.loads(edit.chat_data)
     assert "1 запис" in state["summary"]
-    assert any(item["type"] == "booking" and item["client"] == "Анна" for item in state["items"])
+    assert any(item["t"] == "b" and item["c"] == "Анна" for item in state["items"])
 
 
 @pytest.mark.asyncio

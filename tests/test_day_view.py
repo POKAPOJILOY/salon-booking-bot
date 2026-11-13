@@ -21,6 +21,8 @@ def db():
 def test_day_card_shows_booking_block_break_free_slots_and_revenue(db):
     database, service_id = db
     day = (datetime.now(LOCAL_TZ) + timedelta(days=1)).date()
+    while day.weekday() == 6:
+        day += timedelta(days=1)
     start = datetime.combine(day, time(12), tzinfo=LOCAL_TZ)
     client_id = database.upsert_client(100, "Анна", "+79990000000")
     database.create_booking(client_id, service_id, start, now=start - timedelta(hours=3))

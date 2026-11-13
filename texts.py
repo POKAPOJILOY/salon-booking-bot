@@ -43,7 +43,7 @@ def format_slot(value: str | datetime) -> str:
 def booking_card(booking) -> str:
     return (
         f"Услуга: {booking['service_name']}\n"
-        f"Цена: {booking['price']} ₽\n"
+        f"Цена: {money(booking['price'])}\n"
         f"Когда: {format_slot(booking['start_at'])}\n"
         f"Имя: {booking['client_name']}\n"
         f"Телефон: {booking['phone']}"
@@ -72,26 +72,27 @@ def master_notification(booking, action: str = "Новая запись", demo: 
     return f"{prefix}{action} ({source})\n\n{booking_card(booking)}"
 
 
+MENU_CANCEL_HINT = "\n\nИли нажмите любую кнопку меню внизу, чтобы отменить диалог."
 ADMIN_MENU = "Меню мастера"
 ADMIN_NO_BOOKINGS = "На сегодня и завтра записей нет."
 ADMIN_LINK = "Ваша ссылка для клиентов:"
-ADMIN_MANUAL_NAME = "Введите имя клиента."
-ADMIN_MANUAL_PHONE = "Введите телефон клиента."
+ADMIN_MANUAL_NAME = "Введите имя клиента." + MENU_CANCEL_HINT
+ADMIN_MANUAL_PHONE = "Введите телефон клиента." + MENU_CANCEL_HINT
 ADMIN_MANUAL_DONE = "Запись добавлена вручную."
-ADMIN_BLOCK_DATE = "Введите дату блокировки в формате ДД.ММ.ГГГГ."
-ADMIN_BLOCK_INTERVAL = "Введите интервал, например 12:00-13:00."
-ADMIN_BLOCK_REASON = "Введите причину или «нет»."
+ADMIN_BLOCK_DATE = "Введите дату блокировки в формате ДД.ММ.ГГГГ." + MENU_CANCEL_HINT
+ADMIN_BLOCK_INTERVAL = "Введите интервал, например 12:00-13:00." + MENU_CANCEL_HINT
+ADMIN_BLOCK_REASON = "Введите причину или «нет»." + MENU_CANCEL_HINT
 ADMIN_BLOCK_DONE = "Время заблокировано."
 ADMIN_INVALID_DATE = "Не удалось распознать дату. Используйте ДД.ММ.ГГГГ."
 ADMIN_INVALID_INTERVAL = "Используйте интервал ЧЧ:ММ-ЧЧ:ММ, конец должен быть позже начала."
-ADMIN_SERVICE_NAME = "Введите название услуги."
-ADMIN_SERVICE_PRICE = "Введите цену в рублях, целым числом."
-ADMIN_SERVICE_DURATION = "Введите длительность в минутах."
+ADMIN_SERVICE_NAME = "Введите название услуги." + MENU_CANCEL_HINT
+ADMIN_SERVICE_PRICE = "Введите цену в рублях, целым числом." + MENU_CANCEL_HINT
+ADMIN_SERVICE_DURATION = "Введите длительность в минутах." + MENU_CANCEL_HINT
 ADMIN_SERVICE_DONE = "Услуга сохранена."
-ADMIN_SCHEDULE_DAY = "Введите часы для {day}, например 10:00-19:00, или «выходной»."
-ADMIN_SCHEDULE_BREAK = "Введите общий перерыв, например 14:00-14:30, или «нет»."
+ADMIN_SCHEDULE_DAY = "Введите часы для {day}, например 10:00-19:00, или «выходной»." + MENU_CANCEL_HINT
+ADMIN_SCHEDULE_BREAK = "Введите общий перерыв, например 14:00-14:30, или «нет»." + MENU_CANCEL_HINT
 ADMIN_SCHEDULE_DONE = "Расписание сохранено."
-ADMIN_SETTING_VALUE = "Введите новое числовое значение."
+ADMIN_SETTING_VALUE = "Введите новое числовое значение." + MENU_CANCEL_HINT
 ADMIN_SETTING_DONE = "Настройка сохранена."
 ADMIN_CLIENT_CANCELLED = "Мастер отменил вашу запись. Выберите другое время через /start."
 
@@ -164,3 +165,22 @@ def day_summary(booking_count: int, free_count: int) -> str:
 
 
 WIDGET_HEADLINE = "💅 Пора обновить маникюр! ✨"
+
+
+ASK_NAME += MENU_CANCEL_HINT
+ASK_PHONE += MENU_CANCEL_HINT
+
+
+DEMO_MENU = "🎬 Выберите демо-сценарий. Каждый показывает конкретную выгоду для мастера."
+DEMO_FULL = "▶️ Полный прогон"
+DEMO_BUSY = "📊 Показать перегруженный день"
+DEMO_CLIENT = "🙋‍♀️ Сыграть клиента"
+DEMO_DISABLE = "Выключить ДЕМО и очистить данные"
+DEMO_BOOKING_NOTE = "Новая запись: мастер сразу видит клиента и время, без переписки."
+DEMO_REMINDER_NOTE = "Автоматическое напоминание снижает риск забытых визитов."
+DEMO_CLIENT_LINK = "Клиентка открыла ссылку: ей не нужно ждать ответа мастера."
+DEMO_CLIENT_SERVICE = "Она выбрала услугу: цена и длительность понятны сразу."
+DEMO_CLIENT_TIME = "Она выбрала свободное время: занятые окна не предлагаются."
+DEMO_CLIENT_CONFIRM = "Запись подтверждена: у мастера появилась готовая карточка."
+DEMO_CLIENT_REMINDER = "Перед визитом клиентка получает напоминание автоматически."
+DEMO_CLIENT_RETURN = "Через 3 недели бот предлагает вернуться с прежней услугой — без нового ввода данных."

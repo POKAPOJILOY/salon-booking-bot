@@ -20,7 +20,7 @@ class SendWidget(TelegramMethod[Message]):
     chat_data: str
     caption: str
     allow_queries: bool = True
-    reply_markup: InlineKeyboardMarkup
+    reply_markup: InlineKeyboardMarkup | None = None
 
     @property
     def __returning__(self):
@@ -152,7 +152,10 @@ def widget_height(db: SalonDB, booking) -> int:
 
 
 async def send_reinvite_message(bot, db: SalonDB, booking) -> bool:
-    caption = texts.reinvite_text(booking["client_name"], booking["reinvite_days"])
+    caption = (
+        f"{texts.WIDGET_HEADLINE}\n{booking['service_name']} · "
+        f"{texts.money(booking['price'])} — выберите удобное время"
+    )
     fallback = reinvite_fallback(booking["id"])
     if WIDGETS_ENABLED and booking["is_active"] and db.next_slots(booking["service_id"], limit=1, days=14):
         try:
@@ -164,10 +167,14 @@ async def send_reinvite_message(bot, db: SalonDB, booking) -> bool:
                 caption=caption,
                 reply_markup=fallback,
             ))
+            if booking["demo_mode"]:
+                await bot.send_message(booking["tg_id"], texts.DEMO_CLIENT_RETURN)
             return True
         except Exception as exc:
             logging.warning("Виджет недоступен, отправляем кнопки: %s", exc)
     await bot.send_message(booking["tg_id"], caption, reply_markup=fallback)
+    if booking["demo_mode"]:
+        await bot.send_message(booking["tg_id"], texts.DEMO_CLIENT_RETURN)
     return True
 
 

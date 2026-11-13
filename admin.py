@@ -1,6 +1,7 @@
 import logging
 import re
 from datetime import date, datetime, time, timedelta
+from functools import wraps
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -13,7 +14,7 @@ from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardButton, I
 import texts
 from client import valid_name, valid_phone
 from database import LOCAL_TZ, SalonDB, SlotUnavailable, utc_now
-from demo import run_demo_scenario
+from demo import cleanup_demo_data, create_busy_demo_day, run_client_demo, run_demo_scenario
 from day_widget import refresh_open_day, send_day_widget
 from keyboards import inline_keyboard, master_reply_menu, next_step_keyboard
 from views import day_card, day_keyboard, week_schedule_keyboard, week_schedule_text
@@ -29,17 +30,41 @@ class MasterOnly(BaseFilter):
 router.message.filter(MasterOnly())
 router.callback_query.filter(MasterOnly())
 
+MENU_LABELS = frozenset({
+    texts.MASTER_BOOKINGS, texts.MASTER_ADD, texts.MASTER_BLOCK,
+    texts.MASTER_SERVICES, texts.MASTER_SCHEDULE, texts.MASTER_SETTINGS,
+    texts.MASTER_LINK, texts.MASTER_STATS, texts.MASTER_DEMO,
+})
 
-@router.message.middleware()
-async def reset_reply_menu_state(handler, message: Message, data):
-    menu_labels = {
-        texts.MASTER_BOOKINGS, texts.MASTER_ADD, texts.MASTER_BLOCK,
-        texts.MASTER_SERVICES, texts.MASTER_SCHEDULE, texts.MASTER_SETTINGS,
-        texts.MASTER_LINK, texts.MASTER_STATS, texts.MASTER_DEMO,
+
+async def dispatch_menu_action(message, state, db, bot=None, master_id=None):
+    actions = {
+        texts.MASTER_BOOKINGS: lambda: bookings(message, db, bot),
+        texts.MASTER_ADD: lambda: manual_start(message, db),
+        texts.MASTER_BLOCK: lambda: block_start(message, state),
+        texts.MASTER_SERVICES: lambda: services(message, db),
+        texts.MASTER_SCHEDULE: lambda: schedule(message, db),
+        texts.MASTER_SETTINGS: lambda: settings(message, db),
+        texts.MASTER_LINK: lambda: my_link(message, bot, db),
+        texts.MASTER_STATS: lambda: statistics(message, db),
+        texts.MASTER_DEMO: lambda: demo(message, db, bot, master_id or db.master_id),
     }
-    if message.text in menu_labels:
-        await data["state"].clear()
-    return await handler(message, data)
+    await actions[message.text]()
+
+
+def menu_interruptible(handler):
+    @wraps(handler)
+    async def wrapper(message, state, *args, **kwargs):
+        db = kwargs.get("db") or (args[0] if args and isinstance(args[0], SalonDB) else None)
+        text = getattr(message, "text", None)
+        if text in MENU_LABELS and db is not None and await state.get_state() is not None:
+            await state.clear()
+            return await dispatch_menu_action(
+                message, state, db,
+                bot=kwargs.get("bot"), master_id=kwargs.get("master_id"),
+            )
+        return await handler(message, state, *args, **kwargs)
+    return wrapper
 
 
 class ManualStates(StatesGroup):
@@ -100,10 +125,10 @@ async def edit_callback_message(callback: CallbackQuery, text: str, reply_markup
 
 
 async def present(event, text: str, reply_markup=None) -> None:
-    if isinstance(event, Message):
-        await event.answer(text, reply_markup=reply_markup)
-    else:
+    if isinstance(event, CallbackQuery) or hasattr(event, "message"):
         await edit_callback_message(event, text, reply_markup)
+    else:
+        await event.answer(text, reply_markup=reply_markup)
 
 
 async def acknowledge(event, text: str | None = None, show_alert: bool = False) -> None:
@@ -133,7 +158,10 @@ def parse_interval(value: str) -> tuple[str, str]:
 def stats_text(db: SalonDB) -> str:
     stats = db.statistics()
     lines = [f"{'ДЕМО · ' if db.get_master()['demo_mode'] else ''}Статистика"]
-    for key, title in (("all", "За всё время"), ("last30", "За 30 дней")):
+    sections = [("all", "За всё время")]
+    if stats["all"] != stats["last30"]:
+        sections.append(("last30", "За 30 дней"))
+    for key, title in sections:
         row = stats[key]
         lines.extend([
             "",
@@ -149,26 +177,31 @@ def stats_text(db: SalonDB) -> str:
 
 
 async def show_day(event, db: SalonDB, day: date, bot) -> None:
-    if isinstance(event, Message):
+    if not hasattr(event, "message"):
         await send_day_widget(bot, db, day, event.from_user.id)
         return
     if getattr(event.message, "widget", None):
         try:
             await send_day_widget(bot, db, day, event.from_user.id, fallback=False)
-            await bot(DeleteMessage(
-                chat_id=event.message.chat.id, message_id=event.message.message_id
-            ))
-        except TelegramBadRequest:
-            await present(event, day_card(db, day), day_keyboard(db, day))
         except Exception:
-            logging.exception("Не удалось заменить виджет дня")
+            logging.exception("Не удалось отправить виджет дня при навигации")
             await present(event, day_card(db, day), day_keyboard(db, day))
+        else:
+            try:
+                await bot(DeleteMessage(
+                    chat_id=event.message.chat.id, message_id=event.message.message_id
+                ))
+            except Exception:
+                pass
         return
     await present(event, day_card(db, day), day_keyboard(db, day))
 
 
+@menu_interruptible
 @router.message(CommandStart())
+@menu_interruptible
 @router.message(Command("menu"))
+@menu_interruptible
 @router.message(F.text == "Меню")
 async def admin_start(message: Message, state: FSMContext, db: SalonDB) -> None:
     await state.clear()
@@ -184,6 +217,7 @@ async def admin_back(callback: CallbackQuery, state: FSMContext, db: SalonDB) ->
 
 
 @router.callback_query(F.data == "admin_link")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_LINK)
 async def my_link(event, bot, db: SalonDB) -> None:
     me = await bot.get_me()
@@ -197,6 +231,7 @@ async def my_link(event, bot, db: SalonDB) -> None:
 
 
 @router.callback_query(F.data == "admin_bookings")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_BOOKINGS)
 async def bookings(event, db: SalonDB, bot) -> None:
     day = utc_now().astimezone(LOCAL_TZ).date()
@@ -225,6 +260,7 @@ async def day_pick(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(DayPickStates.day)
 async def day_picked(message: Message, state: FSMContext, db: SalonDB, bot) -> None:
     try:
@@ -279,7 +315,59 @@ async def admin_cancel_yes(callback: CallbackQuery, db: SalonDB, bot, master_id:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("admin_reschedule:"))
+async def admin_reschedule(callback: CallbackQuery, state: FSMContext, db: SalonDB) -> None:
+    booking = db.get_booking(int(callback.data.split(":")[1]))
+    if not booking or booking["status"] != "active":
+        await callback.answer(texts.BOOKING_NOT_FOUND, show_alert=True)
+        return
+    await state.set_data({"reschedule_id": booking["id"], "service_id": booking["service_id"]})
+    buttons = [
+        (texts.format_day(day), f"admin_reschedule_date:{day.isoformat()}")
+        for day in db.available_dates(booking["service_id"])
+    ]
+    await edit_callback_message(callback, texts.CHOOSE_DATE, inline_keyboard(buttons, columns=3))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_reschedule_date:"))
+async def admin_reschedule_date(callback: CallbackQuery, state: FSMContext, db: SalonDB) -> None:
+    data = await state.get_data()
+    day = date.fromisoformat(callback.data.split(":")[1])
+    buttons = [
+        (f"{texts.local_time(slot.isoformat()):%H:%M}", f"admin_reschedule_time:{slot.isoformat()}")
+        for slot in db.available_slots(data["service_id"], day)
+    ]
+    await edit_callback_message(callback, texts.CHOOSE_TIME, inline_keyboard(buttons, columns=4))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_reschedule_time:"))
+async def admin_reschedule_time(callback: CallbackQuery, state: FSMContext, db: SalonDB, bot, master_id: int) -> None:
+    data = await state.get_data()
+    old = db.get_booking(data["reschedule_id"])
+    try:
+        new_id = db.reschedule_booking(old["id"], datetime.fromisoformat(callback.data.split(":", 1)[1]))
+    except (ValueError, SlotUnavailable):
+        await callback.answer(texts.SLOT_TAKEN, show_alert=True)
+        return
+    booking = db.get_booking(new_id)
+    await state.clear()
+    if booking["tg_id"]:
+        try:
+            await bot.send_message(booking["tg_id"], texts.confirmation(booking))
+        except TelegramAPIError:
+            logging.exception("Не удалось уведомить клиента о переносе")
+    await edit_callback_message(
+        callback, texts.done_text("запись перенесена"), next_step_keyboard("schedule")
+    )
+    await refresh_open_day(bot, db, master_id, texts.local_time(old["start_at"]).date())
+    await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_manual")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_ADD)
 async def manual_start(event, db: SalonDB) -> None:
     await present(
@@ -322,6 +410,7 @@ async def manual_time(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(ManualStates.name)
 async def manual_name(message: Message, state: FSMContext) -> None:
     if not valid_name(message.text or ""):
@@ -332,6 +421,7 @@ async def manual_name(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_MANUAL_PHONE)
 
 
+@menu_interruptible
 @router.message(ManualStates.phone)
 async def manual_phone(message: Message, state: FSMContext, db: SalonDB, bot, master_id: int) -> None:
     if not valid_phone(message.text or ""):
@@ -354,6 +444,7 @@ async def manual_phone(message: Message, state: FSMContext, db: SalonDB, bot, ma
 
 
 @router.callback_query(F.data == "admin_block")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_BLOCK)
 async def block_start(event, state: FSMContext) -> None:
     await state.set_state(BlockStates.day)
@@ -361,6 +452,7 @@ async def block_start(event, state: FSMContext) -> None:
     await acknowledge(event)
 
 
+@menu_interruptible
 @router.message(BlockStates.day)
 async def block_day(message: Message, state: FSMContext) -> None:
     try:
@@ -373,6 +465,7 @@ async def block_day(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_BLOCK_INTERVAL)
 
 
+@menu_interruptible
 @router.message(BlockStates.interval)
 async def block_interval(message: Message, state: FSMContext) -> None:
     try:
@@ -385,6 +478,7 @@ async def block_interval(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_BLOCK_REASON)
 
 
+@menu_interruptible
 @router.message(BlockStates.reason)
 async def block_reason(message: Message, state: FSMContext, db: SalonDB, bot, master_id: int) -> None:
     data = await state.get_data()
@@ -400,6 +494,7 @@ async def block_reason(message: Message, state: FSMContext, db: SalonDB, bot, ma
 
 
 @router.callback_query(F.data == "admin_services")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_SERVICES)
 async def services(event, db: SalonDB) -> None:
     rows = db.list_services(include_inactive=True)
@@ -441,6 +536,7 @@ async def service_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(ServiceStates.name)
 async def service_name(message: Message, state: FSMContext) -> None:
     if not (message.text or "").strip():
@@ -451,6 +547,7 @@ async def service_name(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_SERVICE_PRICE)
 
 
+@menu_interruptible
 @router.message(ServiceStates.price)
 async def service_price(message: Message, state: FSMContext) -> None:
     try:
@@ -465,6 +562,7 @@ async def service_price(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_SERVICE_DURATION)
 
 
+@menu_interruptible
 @router.message(ServiceStates.duration)
 async def service_duration(message: Message, state: FSMContext, db: SalonDB) -> None:
     try:
@@ -481,6 +579,7 @@ async def service_duration(message: Message, state: FSMContext, db: SalonDB) -> 
 
 
 @router.callback_query(F.data == "admin_schedule")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_SCHEDULE)
 async def schedule(event, db: SalonDB) -> None:
     await present(event, week_schedule_text(db), week_schedule_keyboard())
@@ -508,6 +607,7 @@ async def schedule_weekday(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(ScheduleStates.days)
 async def schedule_day(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
@@ -527,6 +627,7 @@ async def schedule_day(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ADMIN_SCHEDULE_BREAK)
 
 
+@menu_interruptible
 @router.message(ScheduleStates.break_time)
 async def schedule_break(message: Message, state: FSMContext, db: SalonDB) -> None:
     value = (message.text or "").strip()
@@ -556,6 +657,7 @@ async def schedule_break(message: Message, state: FSMContext, db: SalonDB) -> No
 
 
 @router.callback_query(F.data == "admin_settings")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_SETTINGS)
 async def settings(event, db: SalonDB) -> None:
     master = db.get_master()
@@ -580,8 +682,11 @@ async def settings(event, db: SalonDB) -> None:
 @router.callback_query(F.data == "demo_toggle")
 async def demo_toggle(callback: CallbackQuery, db: SalonDB) -> None:
     enabled = not db.get_master()["demo_mode"]
-    db.update_master(demo_mode=enabled)
-    action = "демо-режим включён" if enabled else "демо-режим выключен"
+    if enabled:
+        db.update_master(demo_mode=1)
+    else:
+        cleanup_demo_data(db)
+    action = "демо-режим включён" if enabled else "демо-режим выключен, демо-данные удалены"
     await edit_callback_message(callback, texts.done_text(action), reply_markup=next_step_keyboard("settings"))
     await callback.answer()
 
@@ -598,6 +703,7 @@ async def setting_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+@menu_interruptible
 @router.message(SettingStates.value)
 async def setting_value(message: Message, state: FSMContext, db: SalonDB) -> None:
     data = await state.get_data()
@@ -616,6 +722,7 @@ async def setting_value(message: Message, state: FSMContext, db: SalonDB) -> Non
 
 
 @router.callback_query(F.data == "admin_stats")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_STATS)
 async def statistics(event, db: SalonDB) -> None:
     await present(event, stats_text(db), inline_keyboard([("← Меню", "admin_menu")]))
@@ -623,16 +730,55 @@ async def statistics(event, db: SalonDB) -> None:
 
 
 @router.callback_query(F.data == "admin_demo")
+@menu_interruptible
 @router.message(F.text == texts.MASTER_DEMO)
 async def demo(event, db: SalonDB, bot, master_id: int) -> None:
+    keyboard = inline_keyboard([
+        (texts.DEMO_FULL, "demo_full"),
+        (texts.DEMO_BUSY, "demo_busy"),
+        (texts.DEMO_CLIENT, "demo_client"),
+        (texts.DEMO_DISABLE, "demo_disable"),
+    ])
+    await present(event, texts.DEMO_MENU, keyboard)
+    await acknowledge(event)
+
+
+@router.callback_query(F.data == "demo_full")
+async def demo_full(callback: CallbackQuery, db: SalonDB, bot, master_id: int) -> None:
     try:
         run_demo_scenario(bot, db, master_id)
     except SlotUnavailable as exc:
-        if isinstance(event, Message):
-            await event.answer(str(exc))
-        else:
-            await acknowledge(event, str(exc), show_alert=True)
+        await callback.answer(str(exc), show_alert=True)
         return
-    action = "демо запущено. Новая запись — через 10 секунд, напоминание — через 20, приглашение — примерно через 60"
-    await present(event, texts.done_text(action), next_step_keyboard("settings"))
-    await acknowledge(event)
+    action = "полный прогон запущен: запись — 10 секунд, напоминание — 20, возврат — примерно 60"
+    await edit_callback_message(callback, texts.done_text(action), next_step_keyboard("settings"))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "demo_busy")
+async def demo_busy(callback: CallbackQuery, db: SalonDB, bot, master_id: int) -> None:
+    try:
+        day = create_busy_demo_day(db, master_id)
+    except SlotUnavailable as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    await send_day_widget(bot, db, day, master_id)
+    await callback.message.answer(texts.done_text("перегруженный день показан"), reply_markup=next_step_keyboard("schedule"))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "demo_client")
+async def demo_client(callback: CallbackQuery, db: SalonDB, bot, master_id: int) -> None:
+    run_client_demo(bot, db, master_id)
+    await edit_callback_message(callback, texts.done_text("клиентский сценарий запущен"), next_step_keyboard("settings"))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "demo_disable")
+async def demo_disable(callback: CallbackQuery, db: SalonDB) -> None:
+    cleanup_demo_data(db)
+    await edit_callback_message(
+        callback, texts.done_text("демо-режим выключен, демо-данные удалены"),
+        next_step_keyboard("settings"),
+    )
+    await callback.answer()

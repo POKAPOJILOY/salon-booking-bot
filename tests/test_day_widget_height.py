@@ -22,7 +22,7 @@ def test_late_evening_booking_is_kept_in_widget_items():
     start = datetime.combine(day, time(19), tzinfo=LOCAL_TZ)
     database.create_booking(client_id, service_id, start, now=start - timedelta(hours=3))
     state = json.loads(day_widget_state(database, day))
-    booking = next(item for item in state["items"] if item["type"] == "booking")
-    assert booking["start"] == "19:00"
-    assert booking["end"] == "20:00"
+    booking = next(item for item in state["items"] if item["t"] == "b")
+    assert booking["s"] == "19:00"
+    assert booking["e"] == "20:00"
     database.close()

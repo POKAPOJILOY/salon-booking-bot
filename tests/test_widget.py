@@ -66,7 +66,8 @@ async def test_disabled_widget_uses_button_fallback(db, monkeypatch):
     assert await send_reinvite_message(bot, database, booking)
     bot.send_message.assert_awaited_once()
     assert bot.methods == []
-    assert "Подобрать" in bot.send_message.await_args.args[1]
+    assert "выберите удобное время" in bot.send_message.await_args.args[1]
+    assert "2 000 ₽" in bot.send_message.await_args.args[1]
 
 
 @pytest.mark.asyncio
