@@ -63,41 +63,42 @@ WIDGET_HTML = """<!doctype html>
 <style>
 :root{color-scheme:light dark;--target:44px;--salon-text:#573B47;--salon-muted:#8B6A78;--salon-accent:#B85C82;--salon-chip:#F2C9D9;--salon-chip-text:#5B3445;--salon-selected:#A94C74;--salon-selected-text:#FFF}
 @media(prefers-color-scheme:dark){:root{--salon-text:#F9EEF3;--salon-muted:#D5B8C4;--salon-accent:#E6A4BD;--salon-chip:#714A5C;--salon-chip-text:#FCEBF2;--salon-selected:#D988A8;--salon-selected-text:#24151C}}
-body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;padding:16px;border-radius:22px;font-family:"Avenir Next Rounded","SF Pro Rounded","Segoe UI Rounded","Arial Rounded MT Bold","Trebuchet MS",system-ui,sans-serif;line-height:1.45;color:var(--salon-text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB)}
+body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;padding:16px;border-radius:22px;font-family:ui-rounded,system-ui,sans-serif;line-height:1.45;color:var(--salon-text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB)}
 @media(prefers-color-scheme:dark){main{background:linear-gradient(145deg,#5A414D,var(--tg-theme-bg-color,#1F1B1E))}}
 main::before,main::after{content:'';position:absolute;border-radius:50%;background:rgba(255,255,255,.3);pointer-events:none}main::before{width:120px;height:120px;right:-35px;top:-42px}main::after{width:140px;height:140px;left:-48px;bottom:-65px}
 @media(prefers-color-scheme:dark){main::before,main::after{background:rgba(230,164,189,.1)}}main>*{position:relative;z-index:1}
 h1{font-size:19px;line-height:1.25;margin:0 0 7px}#title{font-size:14px;font-weight:600;margin:0 0 3px}#subtitle{font-size:13px;color:var(--salon-muted);margin:0 0 12px}
 h2{font-size:14px;font-weight:700;margin:12px 0 6px}ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}li{margin:0}
-button{min-block-size:var(--target);min-inline-size:var(--target);padding:8px 15px;border:1px solid rgba(133,73,96,.16);border-radius:999px;background:var(--salon-chip);color:var(--salon-chip-text);font:inherit;font-weight:600;cursor:pointer;transition:background-color .16s,color .16s,opacity .16s,transform .16s}
+button{min-height:var(--target);min-width:var(--target);padding:8px 15px;border:1px solid rgba(133,73,96,.16);border-radius:999px;background:var(--salon-chip);color:var(--salon-chip-text);font:inherit;font-weight:600;cursor:pointer;transition:background-color .16s,color .16s,opacity .16s,transform .16s}
 button:focus-visible{outline:3px solid var(--salon-accent);outline-offset:2px}button:disabled{opacity:.5;cursor:default}button.selected{background:var(--salon-selected);color:var(--salon-selected-text);opacity:1;transform:scale(1.04)}
-button.leaving{opacity:0;transform:scale(.85)}@media(hover:hover){button:hover{transform:translateY(-1px)}}
+button.leaving{opacity:0;transform:scale(.85)}button:hover{transform:translateY(-1px)}
 #status{min-height:20px;color:var(--salon-muted);font-size:13px;line-height:1.4;margin:12px 0 0}.trust{font-size:12px;color:var(--salon-muted);margin:14px 0 0;padding-top:10px;border-top:1px solid rgba(139,106,120,.18)}
 #success{text-align:center;padding:32px 4px 18px}.success-icon{font-size:42px}.success-title{font-size:20px;font-weight:700;margin:5px 0}#success-details{font-size:15px;margin:0}#success-note{font-size:12px;color:var(--salon-muted);margin:7px 0 0}#success-service{margin:18px 0 0;padding-top:12px;border-top:1px solid rgba(139,106,120,.18);font-weight:600}
 @media(prefers-reduced-motion:reduce){button{transition-duration:.01s}}
 </style></head><body><main><h1 id="headline">💅 Пора обновить маникюр! ✨</h1><p id="title"></p><p id="subtitle"></p><div id="slots"></div><p id="status" aria-live="polite"></p><div id="success" hidden><div class="success-icon">💅</div><div class="success-title">Вы записаны!</div><p id="success-details"></p><p id="success-note">Напомним за 24 часа</p><p id="success-service"></p></div><p class="trust">Перенос и отмена — в один тап</p></main>
 <script>
 const W=window.TelegramWidget,root=document.getElementById('slots'),status=document.getElementById('status');
+let buttons=[];
 function showSuccess(label){
  root.hidden=true;status.hidden=true;document.getElementById('title').hidden=true;document.getElementById('subtitle').hidden=true;document.getElementById('headline').hidden=true;
  let data={};try{data=JSON.parse(W.chatData||'{}')}catch(e){}
  document.getElementById('success').hidden=false;document.getElementById('success-details').textContent=label;
- document.getElementById('success-service').textContent=(data.service||'')+' · '+String(data.price||'').replace(/\\B(?=([0-9]{3})+(?![0-9]))/g,' ')+' ₽';
+ document.getElementById('success-service').textContent=(data.service||'')+' · '+new Intl.NumberFormat('ru-RU').format(data.price||0)+' ₽';
 }
 function render(data){
- root.hidden=false;status.hidden=false;document.getElementById('title').hidden=false;document.getElementById('subtitle').hidden=false;document.getElementById('headline').hidden=false;document.getElementById('success').hidden=true;status.textContent=data.notice||'';let day='',list=null;
+ buttons=[];root.hidden=false;status.hidden=false;document.getElementById('title').hidden=false;document.getElementById('subtitle').hidden=false;document.getElementById('headline').hidden=false;document.getElementById('success').hidden=true;status.textContent=data.notice||'';let day='',list=null;
  (data.slots||[]).forEach(slot=>{
   if(slot.d!==day){day=slot.d;let heading=document.createElement('h2');heading.textContent=day;root.appendChild(heading);list=document.createElement('ul');root.appendChild(list)}
-  let item=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=slot.t;button.setAttribute('data-slot',slot.s);
+  let item=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=slot.t;button.setAttribute('data-slot',slot.s);buttons.push(button);
   button.addEventListener('click',()=>{
-   root.querySelectorAll('button').forEach(b=>b.disabled=true);button.classList.add('selected');button.setAttribute('aria-pressed','true');status.textContent='Проверяем…';
+   buttons.forEach(b=>b.disabled=true);button.classList.add('selected');button.setAttribute('aria-pressed','true');status.textContent='Проверяем…';
    W.request('book:'+data.o+':'+slot.s).then(answer=>{
     let result={};try{result=JSON.parse(answer.result||'{}')}catch(e){}
     if(result.status==='booked'){showSuccess(result.label||slot.d+', '+slot.t);return}
     if(result.status==='exists'){status.textContent='У вас уже есть активная запись.';return}
     status.textContent=result.status==='stale'?'Это время только что заняли, выберите другое':'Не удалось записаться. Попробуйте ещё раз.';
-    button.classList.remove('selected');button.removeAttribute('aria-pressed');root.querySelectorAll('button').forEach(b=>b.disabled=false);
-   },error=>{status.textContent='Ошибка: '+error.code;button.classList.remove('selected');button.removeAttribute('aria-pressed');root.querySelectorAll('button').forEach(b=>b.disabled=false)});
+    button.classList.remove('selected');button.removeAttribute('aria-pressed');buttons.forEach(b=>b.disabled=false);
+   },error=>{status.textContent='Ошибка: '+error.code;button.classList.remove('selected');button.removeAttribute('aria-pressed');buttons.forEach(b=>b.disabled=false)});
   });item.appendChild(button);list.appendChild(item);
  });
  if(!(data.slots||[]).length&&!data.notice)status.textContent='Ближайшие две недели заняты — выберите «Другая дата» под сообщением.';
@@ -107,7 +108,7 @@ function draw(){
  document.getElementById('headline').textContent=data.headline||'💅 Пора обновить маникюр! ✨';
  document.getElementById('title').textContent=data.title||'';document.getElementById('subtitle').textContent=data.subtitle||'';
  if(data.success){showSuccess(data.success);return}
- let fresh=data.slots||[],stale=false;root.querySelectorAll('button[data-slot]').forEach(button=>{if(!fresh.some(slot=>slot.s===button.getAttribute('data-slot'))){button.classList.add('leaving');stale=true}});
+ let fresh=data.slots||[],stale=false;buttons.forEach(button=>{if(!fresh.some(slot=>slot.s===button.getAttribute('data-slot'))){button.classList.add('leaving');stale=true}});
  if(stale){setTimeout(()=>{root.innerHTML='';render(data)},160);return}
  root.innerHTML='';render(data);
 }

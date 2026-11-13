@@ -19,7 +19,7 @@ DAY_WIDGET_HTML = """<!doctype html>
 <style>
 :root{color-scheme:light dark;--text:#573B47;--muted:#8B6A78;--accent:#B85C82;--pink:#F2C9D9;--card:#FFF5F9;--line:rgba(139,106,120,.18)}
 @media(prefers-color-scheme:dark){:root{--text:#F9EEF3;--muted:#D5B8C4;--accent:#E6A4BD;--pink:#714A5C;--card:#3C2B33}}
-body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;height:100%;display:flex;flex-direction:column;padding:16px;border-radius:22px;color:var(--text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB);font-family:"Avenir Next Rounded","SF Pro Rounded","Segoe UI Rounded","Arial Rounded MT Bold","Trebuchet MS",system-ui,sans-serif;line-height:1.45}
+body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;height:100%;display:flex;flex-direction:column;padding:16px;border-radius:22px;color:var(--text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB);font-family:ui-rounded,system-ui,sans-serif;line-height:1.45}
 @media(prefers-color-scheme:dark){main{background:linear-gradient(145deg,#5A414D,var(--tg-theme-bg-color,#1F1B1E))}}
 main::before,main::after{content:'';position:absolute;border-radius:50%;background:rgba(255,255,255,.28);pointer-events:none}main::before{width:120px;height:120px;right:-35px;top:-42px}main::after{width:140px;height:140px;left:-48px;bottom:-65px}main>*{position:relative;z-index:1}
 h1{font-size:18px;line-height:1.25;margin:0 0 4px}#summary{font-size:13px;color:var(--muted);margin:0 0 12px;flex-shrink:0}#items{display:grid;gap:8px;flex:1;min-height:0;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch}
