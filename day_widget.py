@@ -19,10 +19,10 @@ DAY_WIDGET_HTML = """<!doctype html>
 <style>
 :root{color-scheme:light dark;--text:#573B47;--muted:#8B6A78;--accent:#B85C82;--pink:#F2C9D9;--card:#FFF5F9;--line:rgba(139,106,120,.18)}
 @media(prefers-color-scheme:dark){:root{--text:#F9EEF3;--muted:#D5B8C4;--accent:#E6A4BD;--pink:#714A5C;--card:#3C2B33}}
-body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;height:100%;display:flex;flex-direction:column;padding:16px;border-radius:22px;color:var(--text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB);font-family:ui-rounded,system-ui,sans-serif;line-height:1.45}
+body{margin:0;background:var(--tg-theme-bg-color,#FFF9FB)}main{position:relative;overflow:hidden;padding:16px;border-radius:22px;color:var(--text);background:linear-gradient(145deg,#F6DDE6,#FFF9FB);font-family:ui-rounded,system-ui,sans-serif;line-height:1.45}
 @media(prefers-color-scheme:dark){main{background:linear-gradient(145deg,#5A414D,var(--tg-theme-bg-color,#1F1B1E))}}
 main::before,main::after{content:'';position:absolute;border-radius:50%;background:rgba(255,255,255,.28);pointer-events:none}main::before{width:120px;height:120px;right:-35px;top:-42px}main::after{width:140px;height:140px;left:-48px;bottom:-65px}main>*{position:relative;z-index:1}
-h1{font-size:18px;line-height:1.25;margin:0 0 4px}#summary{font-size:13px;color:var(--muted);margin:0 0 12px;flex-shrink:0}#items{display:grid;gap:8px;flex:1;min-height:0;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch}
+h1{font-size:18px;line-height:1.25;margin:0 0 4px}#summary{font-size:13px;color:var(--muted);margin:0 0 12px}#items{display:grid;gap:8px}
 .booking{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--pink);color:var(--text);font:inherit;text-align:left;cursor:pointer}
 .booking:focus-visible{outline:3px solid var(--accent);outline-offset:2px}.booking.past{opacity:.5}.time{font-weight:700;white-space:nowrap}.details{min-width:0}.client{display:block;font-weight:600}.service{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-size:13px;font-weight:600;white-space:nowrap}.source{font-size:12px;font-weight:400}
 .row{min-height:44px;display:flex;align-items:center;padding:9px 12px;border-radius:12px;background:var(--card);color:var(--muted);font-size:13px}.free{color:var(--text);background:rgba(255,255,255,.55)}
@@ -114,11 +114,6 @@ def day_widget_state(db: SalonDB, day: date, now: datetime | None = None) -> str
     }, ensure_ascii=False, separators=(",", ":"))
 
 
-def day_widget_height(state: str) -> int:
-    items = len(json.loads(state)["items"])
-    return min(600, max(220, 170 + 44 * items))
-
-
 async def send_day_widget(
     bot,
     db: SalonDB,
@@ -135,7 +130,6 @@ async def send_day_widget(
             message = await bot(SendWidget(
                 chat_id=master_id,
                 html=DAY_WIDGET_HTML,
-                height=day_widget_height(state),
                 chat_data=state,
                 caption=f"📅 Расписание · {texts.format_day(day)}",
                 reply_markup=reply_markup or day_keyboard(db, day),

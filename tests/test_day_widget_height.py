@@ -2,15 +2,15 @@ import json
 from datetime import datetime, time, timedelta
 
 from database import LOCAL_TZ, SalonDB
-from day_widget import DAY_WIDGET_HTML, day_widget_height, day_widget_state
+from day_widget import DAY_WIDGET_HTML, day_widget_state
+from widget import SendWidget
 
 
-def test_day_widget_scrolls_and_height_uses_documented_api_maximum():
-    assert "height:100%" in DAY_WIDGET_HTML
-    assert "overflow-y:auto" in DAY_WIDGET_HTML
-    assert "-webkit-overflow-scrolling:touch" in DAY_WIDGET_HTML
-    state = json.dumps({"items": [{"type": "free"}] * 20})
-    assert day_widget_height(state) == 600
+def test_day_widget_uses_content_height_without_unsupported_inner_scroll():
+    assert "height:100%" not in DAY_WIDGET_HTML
+    assert "overflow-y:auto" not in DAY_WIDGET_HTML
+    assert "-webkit-overflow-scrolling:touch" not in DAY_WIDGET_HTML
+    assert SendWidget.model_fields["height"].default is None
 
 
 def test_late_evening_booking_is_kept_in_widget_items():

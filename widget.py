@@ -16,7 +16,7 @@ from notifications import notify_master
 class SendWidget(TelegramMethod[Message]):
     chat_id: int
     html: str
-    height: int = 320
+    height: int | None = None
     chat_data: str
     caption: str
     allow_queries: bool = True
