@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -14,7 +14,7 @@ import texts
 from client import valid_name, valid_phone
 from database import LOCAL_TZ, SalonDB, SlotUnavailable, utc_now
 from demo import run_demo_scenario
-from day_widget import send_day_widget
+from day_widget import refresh_open_day, send_day_widget
 from keyboards import inline_keyboard, master_reply_menu, next_step_keyboard
 from views import day_card, day_keyboard, week_schedule_keyboard, week_schedule_text
 
@@ -91,11 +91,19 @@ def menu_title(db: SalonDB) -> str:
     return f"{'ДЕМО · ' if db.get_master()['demo_mode'] else ''}{texts.ADMIN_MENU}"
 
 
+async def edit_callback_message(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=reply_markup)
+
+
 async def present(event, text: str, reply_markup=None) -> None:
     if isinstance(event, Message):
         await event.answer(text, reply_markup=reply_markup)
     else:
-        await event.message.edit_text(text, reply_markup=reply_markup)
+        await edit_callback_message(event, text, reply_markup)
 
 
 async def acknowledge(event, text: str | None = None, show_alert: bool = False) -> None:
@@ -171,7 +179,7 @@ async def admin_start(message: Message, state: FSMContext, db: SalonDB) -> None:
 @router.callback_query(F.data == "admin_menu")
 async def admin_back(callback: CallbackQuery, state: FSMContext, db: SalonDB) -> None:
     await state.clear()
-    await callback.message.edit_text(menu_title(db), reply_markup=admin_menu(db))
+    await edit_callback_message(callback, menu_title(db), reply_markup=admin_menu(db))
     await callback.answer()
 
 
@@ -197,6 +205,7 @@ async def bookings(event, db: SalonDB, bot) -> None:
 
 
 @router.callback_query(F.data.startswith("admin_day:"))
+@router.callback_query(F.data.startswith("admin_pick_day:"))
 async def day_navigation(callback: CallbackQuery, db: SalonDB, bot) -> None:
     day = date.fromisoformat(callback.data.split(":")[1])
     await show_day(callback, db, day, bot)
@@ -206,7 +215,13 @@ async def day_navigation(callback: CallbackQuery, db: SalonDB, bot) -> None:
 @router.callback_query(F.data == "admin_day_pick")
 async def day_pick(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(DayPickStates.day)
-    await callback.message.edit_text(texts.ADMIN_BLOCK_DATE)
+    today = utc_now().astimezone(LOCAL_TZ).date()
+    buttons = []
+    for offset in range(7):
+        day = today + timedelta(days=offset)
+        buttons.append((texts.format_day(day), f"admin_pick_day:{day.isoformat()}"))
+    calendar_kb = inline_keyboard(buttons, columns=3)
+    await edit_callback_message(callback, texts.ADMIN_BLOCK_DATE, calendar_kb)
     await callback.answer()
 
 
@@ -260,7 +275,7 @@ async def admin_cancel_yes(callback: CallbackQuery, db: SalonDB, bot, master_id:
     await callback.message.answer(
         texts.done_text(action), reply_markup=next_step_keyboard("cancel")
     )
-    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
+    await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
     await callback.answer()
 
 
@@ -283,7 +298,7 @@ async def manual_service(callback: CallbackQuery, state: FSMContext, db: SalonDB
     service_id = int(callback.data.split(":")[1])
     await state.update_data(service_id=service_id)
     buttons = [(texts.format_day(day), f"manual_date:{day.isoformat()}") for day in db.available_dates(service_id)]
-    await callback.message.edit_text(texts.CHOOSE_DATE, reply_markup=inline_keyboard(buttons, columns=3))
+    await edit_callback_message(callback, texts.CHOOSE_DATE, reply_markup=inline_keyboard(buttons, columns=3))
     await callback.answer()
 
 
@@ -295,7 +310,7 @@ async def manual_date(callback: CallbackQuery, state: FSMContext, db: SalonDB) -
         (f"{texts.local_time(slot.isoformat()):%H:%M}", f"manual_time:{slot.isoformat()}")
         for slot in db.available_slots(data["service_id"], day)
     ]
-    await callback.message.edit_text(texts.CHOOSE_TIME, reply_markup=inline_keyboard(buttons, columns=4))
+    await edit_callback_message(callback, texts.CHOOSE_TIME, reply_markup=inline_keyboard(buttons, columns=4))
     await callback.answer()
 
 
@@ -303,7 +318,7 @@ async def manual_date(callback: CallbackQuery, state: FSMContext, db: SalonDB) -
 async def manual_time(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(start_at=callback.data.split(":", 1)[1])
     await state.set_state(ManualStates.name)
-    await callback.message.edit_text(texts.ADMIN_MANUAL_NAME)
+    await edit_callback_message(callback, texts.ADMIN_MANUAL_NAME)
     await callback.answer()
 
 
@@ -335,7 +350,7 @@ async def manual_phone(message: Message, state: FSMContext, db: SalonDB, bot, ma
     booking = db.get_booking(booking_id)
     action = f"запись создана: {booking['client_name']}, {booking['service_name']}, {texts.format_slot(booking['start_at'])}"
     await message.answer(texts.done_text(action), reply_markup=next_step_keyboard("booking"))
-    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
+    await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
 
 
 @router.callback_query(F.data == "admin_block")
@@ -381,7 +396,7 @@ async def block_reason(message: Message, state: FSMContext, db: SalonDB, bot, ma
     await state.clear()
     action = f"время заблокировано: {texts.format_day(date.fromisoformat(data['day']))}, {data['start_time']}–{data['end_time']}"
     await message.answer(texts.done_text(action), reply_markup=next_step_keyboard("block"))
-    await send_day_widget(bot, db, date.fromisoformat(data["day"]), master_id)
+    await refresh_open_day(bot, db, master_id, date.fromisoformat(data["day"]))
 
 
 @router.callback_query(F.data == "admin_services")
@@ -406,15 +421,15 @@ async def service_toggle(callback: CallbackQuery, db: SalonDB) -> None:
     _, service_id, active = callback.data.split(":")
     db.set_service_active(int(service_id), active == "True")
     action = "услуга включена" if active == "True" else "услуга выключена"
-    await callback.message.edit_text(texts.done_text(action), reply_markup=next_step_keyboard("service"))
+    await edit_callback_message(callback, texts.done_text(action), reply_markup=next_step_keyboard("service"))
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("service_delete:"))
 async def service_delete(callback: CallbackQuery, db: SalonDB) -> None:
     db.delete_service(int(callback.data.split(":")[1]))
-    await callback.message.edit_text(
-        texts.done_text("услуга удалена"), reply_markup=next_step_keyboard("service")
+    await edit_callback_message(
+        callback, texts.done_text("услуга удалена"), reply_markup=next_step_keyboard("service")
     )
     await callback.answer()
 
@@ -422,7 +437,7 @@ async def service_delete(callback: CallbackQuery, db: SalonDB) -> None:
 @router.callback_query(F.data == "service_add")
 async def service_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ServiceStates.name)
-    await callback.message.edit_text(texts.ADMIN_SERVICE_NAME)
+    await edit_callback_message(callback, texts.ADMIN_SERVICE_NAME)
     await callback.answer()
 
 
@@ -478,7 +493,7 @@ async def schedule_edit(callback: CallbackQuery) -> None:
         (name, f"schedule_weekday:{weekday}")
         for weekday, name in enumerate(("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"))
     ]
-    await callback.message.edit_text("Какой день изменить?", reply_markup=inline_keyboard(buttons, columns=2))
+    await edit_callback_message(callback, "Какой день изменить?", reply_markup=inline_keyboard(buttons, columns=2))
     await callback.answer()
 
 
@@ -489,7 +504,7 @@ async def schedule_weekday(callback: CallbackQuery, state: FSMContext) -> None:
     names = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
     await state.set_data({"weekday": weekday, "days": {}})
     await state.set_state(ScheduleStates.days)
-    await callback.message.edit_text(texts.ADMIN_SCHEDULE_DAY.format(day=names[weekday]))
+    await edit_callback_message(callback, texts.ADMIN_SCHEDULE_DAY.format(day=names[weekday]))
     await callback.answer()
 
 
@@ -567,7 +582,7 @@ async def demo_toggle(callback: CallbackQuery, db: SalonDB) -> None:
     enabled = not db.get_master()["demo_mode"]
     db.update_master(demo_mode=enabled)
     action = "демо-режим включён" if enabled else "демо-режим выключен"
-    await callback.message.edit_text(texts.done_text(action), reply_markup=next_step_keyboard("settings"))
+    await edit_callback_message(callback, texts.done_text(action), reply_markup=next_step_keyboard("settings"))
     await callback.answer()
 
 
@@ -579,7 +594,7 @@ async def setting_start(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.update_data(setting=key)
     await state.set_state(SettingStates.value)
-    await callback.message.edit_text(texts.ADMIN_SETTING_VALUE)
+    await edit_callback_message(callback, texts.ADMIN_SETTING_VALUE)
     await callback.answer()
 
 

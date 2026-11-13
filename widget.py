@@ -235,9 +235,9 @@ async def handle_widget_update(update, bot, db: SalonDB, master_id: int):
             booking["tg_id"], texts.confirmation(booking), reply_markup=booking_actions(booking_id)
         )
         await notify_master(bot, master_id, booking)
-        from day_widget import send_day_widget
+        from day_widget import refresh_open_day
 
-        await send_day_widget(bot, db, local.date(), master_id)
+        await refresh_open_day(bot, db, master_id, local.date())
         return True
     except (SlotUnavailable, ValueError, KeyError):
         try:

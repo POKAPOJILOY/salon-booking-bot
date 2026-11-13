@@ -97,5 +97,5 @@ async def test_real_dispatcher_completes_client_booking_flow(tmp_path):
         master_id=1,
     )
     day_widgets = [method for method in bot.methods if method.__api_method__ == "sendWidget" and method.chat_id == 1]
-    assert any("Выручка по записи" in method.caption for method in day_widgets)
+    assert any(method.caption.startswith("📅 Расписание") and "Выручка по записи" in method.chat_data for method in day_widgets)
     database.close()

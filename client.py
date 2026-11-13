@@ -21,13 +21,13 @@ from keyboards import (
     times_keyboard,
 )
 from notifications import notify_master
-from day_widget import send_day_widget
+from day_widget import refresh_open_day
 
 router = Router()
 
 
 async def refresh_master_day(bot, db: SalonDB, master_id: int, booking) -> None:
-    await send_day_widget(bot, db, texts.local_time(booking["start_at"]).date(), master_id)
+    await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
 
 
 @router.message.middleware()

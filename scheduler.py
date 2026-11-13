@@ -23,7 +23,11 @@ async def process_pending(
     reinvite_sender=None,
 ) -> None:
     now = now or utc_now()
-    db.complete_visits(now)
+    completed = db.complete_visits(now)
+    if completed:
+        from day_widget import refresh_open_day
+
+        await refresh_open_day(bot, db, master_id)
     for kind, template in (("reminder24_sent", texts.REMINDER_24), ("reminder1_sent", texts.REMINDER_1)):
         for booking in db.due_reminders(kind, now):
             try:
