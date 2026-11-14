@@ -308,7 +308,7 @@ async def auth_middleware(request: web.Request, handler):
     user = validate_init_data(init_data, request.app[BOT_TOKEN_KEY])
     if not user or not user.get("id"):
         raise web.HTTPUnauthorized(text="Недействительные данные Telegram")
-    if request.path.startswith("/api/day") and user["id"] != request.app[MASTER_ID_KEY]:
+    if (request.path == "/api/day" or request.path.startswith("/api/day/")) and user["id"] != request.app[MASTER_ID_KEY]:
         raise web.HTTPForbidden(text="Этот раздел доступен только мастеру")
     request[TG_USER_KEY] = user
     return await handler(request)

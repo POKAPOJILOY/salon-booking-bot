@@ -143,6 +143,18 @@ async def test_services_listed_for_authorized_user(env):
 
 
 @pytest.mark.asyncio
+async def test_client_can_list_booking_days(env):
+    """Клиент (не мастер) должен получать список дат для календаря — регрессия на баг 403."""
+    database, service_id, bot, app = env
+    client = await web_client(env)
+    response = await client.get(f"/api/days?service_id={service_id}", headers=client_headers())
+    assert response.status == 200
+    data = await response.json()
+    assert data["days"]  # список дат не пуст
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_master_endpoints_reject_regular_client(env):
     client = await web_client(env)
     response = await client.get("/api/day", headers=client_headers())
