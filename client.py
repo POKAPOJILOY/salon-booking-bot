@@ -19,6 +19,7 @@ from keyboards import (
     next_step_keyboard,
     phone_keyboard,
     services_keyboard,
+    start_webapp_keyboard,
     times_keyboard,
 )
 from notifications import notify_master
@@ -123,6 +124,12 @@ async def client_start(message: Message, state: FSMContext, db: SalonDB, master_
         f"{texts.WELCOME}\n\n{texts.CLIENT_MENU_HINT}",
         reply_markup=client_reply_menu(),
     )
+    webapp_keyboard = start_webapp_keyboard()
+    if webapp_keyboard:
+        await message.answer(
+            f"{texts.WIDGET_HEADLINE}\n{texts.WIDGET_SUBTITLE}",
+            reply_markup=webapp_keyboard,
+        )
 
 
 @menu_interruptible

@@ -1,7 +1,8 @@
 from datetime import date, datetime, time, timedelta
 
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, WebAppInfo
 
+import config
 import texts
 from database import LOCAL_TZ, SalonDB, db_time, local_time, utc_now
 from keyboards import inline_keyboard
@@ -163,6 +164,13 @@ def day_keyboard(db: SalonDB, day: date):
     keyboard.inline_keyboard.append([
         InlineKeyboardButton(text=texts.DAY_PICK, callback_data="admin_day_pick")
     ])
+    if config.WEBAPP_PUBLIC_URL:
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="🗓 Открыть день",
+                web_app=WebAppInfo(url=f"{config.WEBAPP_PUBLIC_URL}/app/master?date={day.isoformat()}"),
+            )
+        ])
     for booking in bookings_for_day(db, day):
         local = local_time(booking["start_at"])
         keyboard.inline_keyboard.append([

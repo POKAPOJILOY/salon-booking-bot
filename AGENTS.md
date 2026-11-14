@@ -8,7 +8,8 @@ Telegram-бот записи к мастеру маникюра (aiogram 3 + SQL
 - `database.py` — SQLite: схема, записи, блоки, реинвайты (INVITE_AFTER_DAYS=21).
 - `client.py` — сценарии клиента (запись, отмена, перенос, реинвайт).
 - `admin.py` — панель мастера (расписание, блоки, отмены/переносы, статистика).
-- `widget.py` — виджет записи/reinvite (Bot API 10.4 Widgets).
+- `webapp.py` — Telegram Mini App: aiohttp-сервер (порт WEBAPP_PORT), страница APP_HTML, JSON API с проверкой initData; запускается из bot.py, только если задан WEBAPP_PUBLIC_URL.
+- `widget.py` — виджет записи/reinvite (Bot API 10.4 Widgets, по умолчанию выключен: WIDGETS_ENABLED=false).
 - `day_widget.py` — виджет «расписание дня» (компактный payload v3, лимит 1000 символов, кап 9 строк).
 - `keyboards.py`, `views.py`, `texts.py` — клавиатуры, тексты, рендер.
 - `scheduler.py`, `notifications.py` — напоминания и уведомления мастеру.

@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 
 import admin
 import client
+import config
 from config import BOT_TOKEN, MASTER_ID
 from database import SalonDB
 from scheduler import scheduler_loop
@@ -27,12 +28,23 @@ async def main() -> None:
     dp.include_router(client.router)
     dp.update.register(handle_widget_update)
     task = asyncio.create_task(scheduler_loop(bot, db, MASTER_ID))
+    webapp_task = None
+    if config.WEBAPP_PUBLIC_URL:
+        import webapp
+
+        webapp_task = asyncio.ensure_future(
+            webapp.run(bot, db, MASTER_ID, BOT_TOKEN, config.WEBAPP_PORT)
+        )
     try:
         await dp.start_polling(
             bot, db=db, master_id=MASTER_ID, allowed_updates=polling_updates(dp)
         )
     finally:
         task.cancel()
+        if webapp_task:
+            webapp_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await webapp_task
         with suppress(asyncio.CancelledError):
             await task
         await bot.session.close()

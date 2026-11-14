@@ -1,7 +1,8 @@
 from datetime import date
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 
+import config
 import texts
 from database import SalonDB, local_time
 
@@ -122,3 +123,26 @@ def reinvite_fallback(booking_id: int) -> InlineKeyboardMarkup:
         ("Другая дата", f"reinvite:{booking_id}"),
         ("Больше не напоминать", f"optout:{booking_id}"),
     ])
+
+
+def reinvite_keyboard(booking_id: int) -> InlineKeyboardMarkup:
+    if not config.WEBAPP_PUBLIC_URL:
+        return reinvite_fallback(booking_id)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📅 Выбрать время",
+            web_app=WebAppInfo(url=f"{config.WEBAPP_PUBLIC_URL}/app?invite={booking_id}"),
+        )],
+        [InlineKeyboardButton(text="Больше не напоминать", callback_data=f"optout:{booking_id}")],
+    ])
+
+
+def start_webapp_keyboard() -> InlineKeyboardMarkup | None:
+    if not config.WEBAPP_PUBLIC_URL:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📅 Записаться",
+            web_app=WebAppInfo(url=f"{config.WEBAPP_PUBLIC_URL}/app"),
+        )
+    ]])

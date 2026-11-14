@@ -6,10 +6,11 @@ from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import InlineKeyboardMarkup, Message
 
+import config
 import texts
 from config import WIDGETS_ENABLED
 from database import SalonDB, SlotUnavailable, local_time
-from keyboards import booking_actions, reinvite_fallback
+from keyboards import booking_actions, reinvite_fallback, reinvite_keyboard
 from notifications import notify_master
 
 
@@ -157,6 +158,13 @@ async def send_reinvite_message(bot, db: SalonDB, booking) -> bool:
         f"{texts.money(booking['price'])} — выберите удобное время"
     )
     fallback = reinvite_fallback(booking["id"])
+    if config.WEBAPP_PUBLIC_URL:
+        await bot.send_message(
+            booking["tg_id"], caption, reply_markup=reinvite_keyboard(booking["id"])
+        )
+        if booking["demo_mode"]:
+            await bot.send_message(booking["tg_id"], texts.DEMO_CLIENT_RETURN)
+        return True
     if WIDGETS_ENABLED and booking["is_active"] and db.next_slots(booking["service_id"], limit=1, days=14):
         try:
             await bot(SendWidget(
