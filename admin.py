@@ -37,6 +37,26 @@ MENU_LABELS = frozenset({
 })
 
 
+# Работает в проде: outer-middleware видит message ДО фильтров роутера, поэтому
+# кнопка меню прерывает любой FSM-диалог. Декоратор menu_interruptible ниже
+# оставлен для юнит-тестов, которые вызывают обработчики напрямую с db.
+@router.message.outer_middleware()
+async def menu_interrupt_middleware(handler, event, data):
+    text = getattr(event, "text", None)
+    if (
+        text in MENU_LABELS
+        and getattr(event, "from_user", None)
+        and event.from_user.id == data.get("master_id")
+    ):
+        state = data.get("state")
+        if state is not None and await state.get_state() is not None:
+            await state.clear()
+            # фильтры состояний читают снапшот raw_state — без сброса
+            # FSM-обработчик всё равно перехватит кнопку меню
+            data["raw_state"] = None
+    return await handler(event, data)
+
+
 async def dispatch_menu_action(message, state, db, bot=None, master_id=None):
     actions = {
         texts.MASTER_BOOKINGS: lambda: bookings(message, db, bot),
@@ -443,12 +463,106 @@ async def manual_phone(message: Message, state: FSMContext, db: SalonDB, bot, ma
     await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())
 
 
+def block_menu_keyboard() -> InlineKeyboardMarkup:
+    return inline_keyboard([
+        (texts.BLOCK_NEW, "admin_block"),
+        (texts.BLOCKS_MY, "admin_blocks"),
+        ("← Меню", "admin_menu"),
+    ])
+
+
+def block_cancel_keyboard(with_list: bool = False) -> InlineKeyboardMarkup:
+    buttons = []
+    if with_list:
+        buttons.append((texts.BLOCKS_MY, "admin_blocks"))
+    buttons.append((texts.BLOCK_CANCEL, "block_cancel"))
+    return inline_keyboard(buttons)
+
+
+@router.callback_query(F.data == "block_menu")
+async def block_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await edit_callback_message(callback, texts.BLOCK_MENU_TITLE, block_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "block_cancel")
+async def block_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await edit_callback_message(callback, texts.BLOCK_MENU_TITLE, block_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_blocks")
+async def blocks_list(callback: CallbackQuery, db: SalonDB) -> None:
+    today = utc_now().astimezone(LOCAL_TZ).date()
+    rows = db.list_blocks(from_date=today)
+    if not rows:
+        await edit_callback_message(callback, texts.BLOCKS_EMPTY, block_menu_keyboard())
+        await callback.answer()
+        return
+    lines = [texts.BLOCK_MENU_TITLE, ""]
+    buttons = []
+    for row in rows:
+        day = date.fromisoformat(row["date"])
+        interval = f"{row['start_time']}–{row['end_time']}"
+        reason = row["reason"] or "Блок"
+        lines.append(f"🚫 {reason} · {texts.format_day(day)} · {interval}")
+        buttons.append([InlineKeyboardButton(
+            text=f"❌ {texts.format_day(day)}, {interval}",
+            callback_data=f"block_delete:{row['id']}",
+        )])
+    buttons.append([InlineKeyboardButton(text="← Назад", callback_data="block_menu")])
+    await edit_callback_message(
+        callback, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("block_delete_yes:"))
+async def block_delete_yes(callback: CallbackQuery, db: SalonDB, bot, master_id: int) -> None:
+    try:
+        block = db.delete_block(int(callback.data.split(":")[1]))
+    except ValueError:
+        await callback.answer(texts.BLOCK_NOT_FOUND, show_alert=True)
+        return
+    day = date.fromisoformat(block["date"])
+    await refresh_open_day(bot, db, master_id, day)
+    action = f"блок удалён: {texts.format_day(day)}, {block['start_time']}–{block['end_time']}"
+    await edit_callback_message(
+        callback,
+        texts.done_text(action),
+        inline_keyboard([(texts.BLOCKS_MY, "admin_blocks"), ("← Меню", "admin_menu")]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("block_delete:"))
+async def block_delete_confirm(callback: CallbackQuery, db: SalonDB) -> None:
+    block = db.get_block(int(callback.data.split(":")[1]))
+    if not block:
+        await callback.answer(texts.BLOCK_NOT_FOUND, show_alert=True)
+        return
+    day = date.fromisoformat(block["date"])
+    question = texts.BLOCK_DELETE_CONFIRM.format(
+        interval=f"{block['start_time']}–{block['end_time']}",
+        reason=block["reason"] or "Блок",
+        day=texts.format_day(day),
+    )
+    keyboard = inline_keyboard([
+        ("Да, удалить", f"block_delete_yes:{block['id']}"),
+        ("Назад", "admin_blocks"),
+    ])
+    await edit_callback_message(callback, question, keyboard)
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_block")
 @menu_interruptible
 @router.message(F.text == texts.MASTER_BLOCK)
 async def block_start(event, state: FSMContext) -> None:
     await state.set_state(BlockStates.day)
-    await present(event, texts.ADMIN_BLOCK_DATE)
+    await present(event, texts.ADMIN_BLOCK_DATE, block_cancel_keyboard(with_list=True))
     await acknowledge(event)
 
 
@@ -458,11 +572,11 @@ async def block_day(message: Message, state: FSMContext) -> None:
     try:
         day = parse_day(message.text or "")
     except ValueError:
-        await message.answer(texts.ADMIN_INVALID_DATE)
+        await message.answer(texts.ADMIN_INVALID_DATE, reply_markup=block_cancel_keyboard())
         return
     await state.update_data(day=day.isoformat())
     await state.set_state(BlockStates.interval)
-    await message.answer(texts.ADMIN_BLOCK_INTERVAL)
+    await message.answer(texts.ADMIN_BLOCK_INTERVAL, reply_markup=block_cancel_keyboard())
 
 
 @menu_interruptible
@@ -471,11 +585,11 @@ async def block_interval(message: Message, state: FSMContext) -> None:
     try:
         start, end = parse_interval(message.text or "")
     except ValueError:
-        await message.answer(texts.ADMIN_INVALID_INTERVAL)
+        await message.answer(texts.ADMIN_INVALID_INTERVAL, reply_markup=block_cancel_keyboard())
         return
     await state.update_data(start_time=start, end_time=end)
     await state.set_state(BlockStates.reason)
-    await message.answer(texts.ADMIN_BLOCK_REASON)
+    await message.answer(texts.ADMIN_BLOCK_REASON, reply_markup=block_cancel_keyboard())
 
 
 @menu_interruptible

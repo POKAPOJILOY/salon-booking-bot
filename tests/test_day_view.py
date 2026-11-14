@@ -31,11 +31,30 @@ def test_day_card_shows_booking_block_break_free_slots_and_revenue(db):
     assert "📅" in text
     assert "1 запис" in text
     assert "свободн" in text
-    assert "12:00 ━ 📱 Анна · Маникюр · 2 000 ₽" in text
-    assert "14:00 ━ 🚫 Обед" in text
-    assert "15:00 ━ 🍽 Перерыв" in text
-    assert "🟢" in text
-    assert text.endswith("Выручка по записи дня: 2 000 ₽")
+    assert "🕛 12:00–13:00 · Анна · Маникюр · 2 000 ₽ 📱" in text
+    assert "🚫 Обед 14:00–15:00" in text
+    assert "☕ Перерыв 15:00–15:30" in text
+    assert "🟢 Свободно:" in text
+    assert text.endswith("💰 Выручка по записи: 2 000 ₽")
+
+
+def test_day_card_collapses_free_ranges_when_day_is_overloaded(db, monkeypatch):
+    import views
+
+    monkeypatch.setattr(views, "MAX_CARD_LINES", 8)
+    database, service_id = db
+    day = (datetime.now(LOCAL_TZ) + timedelta(days=1)).date()
+    while day.weekday() == 6:
+        day += timedelta(days=1)
+    client_id = database.upsert_client(100, "Анна", "+79990000000")
+    for hour in (9, 10, 11, 12):
+        start = datetime.combine(day, time(hour), tzinfo=LOCAL_TZ)
+        database.create_booking(client_id, service_id, start, now=start - timedelta(hours=3))
+    text = day_card(database, day)
+    assert "🟢 Свободно: " in text
+    assert "окна по 60 мин" in text or "окон по 60 мин" in text
+    assert "и ещё" in text
+    assert text.count("🕛") + text.count("🕙") + text.count("🕚") >= 3  # записи показаны полностью
 
 
 def test_day_navigation_and_week_schedule(db):

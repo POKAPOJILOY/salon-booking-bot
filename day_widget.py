@@ -8,7 +8,7 @@ import texts
 from config import WIDGETS_ENABLED
 from database import LOCAL_TZ, SalonDB, local_time, utc_now
 from keyboards import inline_keyboard
-from views import bookings_for_day, day_card, day_keyboard, free_slots_for_day
+from views import bookings_for_day, compress_free_slots, day_card, day_keyboard, free_slots_for_day
 from widget import EditMessageWidgetData, SendWidget
 
 CHAT_DATA_LIMIT = 1000
@@ -61,19 +61,6 @@ function draw(){
 }
 W.onEvent('chatDataChanged',draw);draw();W.ready();
 </script></body></html>"""
-
-
-def compress_free_slots(slots: list[datetime], step: timedelta) -> list[dict]:
-    ranges = []
-    for slot in sorted(slots):
-        if ranges and slot == ranges[-1]["_end"]:
-            ranges[-1]["_end"] = slot + step
-            ranges[-1]["end"] = f"{slot + step:%H:%M}"
-        else:
-            ranges.append({"type": "free", "start": f"{slot:%H:%M}", "end": f"{slot + step:%H:%M}", "_end": slot + step})
-    for item in ranges:
-        del item["_end"]
-    return ranges
 
 
 def _minutes_between(start: str, end: str) -> int:

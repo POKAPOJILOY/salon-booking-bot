@@ -27,6 +27,25 @@ from day_widget import refresh_open_day
 
 router = Router()
 
+CLIENT_MENU_LABELS = frozenset({texts.CLIENT_BOOK, texts.CLIENT_BOOKINGS})
+
+
+# Как и в admin.py: outer-middleware прерывает FSM-диалог кнопкой меню в проде,
+# декоратор menu_interruptible ниже — для прямых вызовов в юнит-тестах.
+@router.message.outer_middleware()
+async def client_menu_interrupt_middleware(handler, event, data):
+    text = getattr(event, "text", None)
+    if (
+        text in CLIENT_MENU_LABELS
+        and getattr(event, "from_user", None)
+        and event.from_user.id != data.get("master_id")
+    ):
+        state = data.get("state")
+        if state is not None and await state.get_state() is not None:
+            await state.clear()
+            data["raw_state"] = None  # фильтры состояний читают этот снапшот
+    return await handler(event, data)
+
 
 async def refresh_master_day(bot, db: SalonDB, master_id: int, booking) -> None:
     await refresh_open_day(bot, db, master_id, texts.local_time(booking["start_at"]).date())

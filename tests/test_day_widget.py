@@ -132,4 +132,4 @@ async def test_day_widget_falls_back_to_text_when_disabled(db, monkeypatch):
     bot = FakeBot()
     assert await send_day_widget(bot, database, day, 1) is False
     bot.send_message.assert_awaited_once()
-    assert "Выручка по записи дня" in bot.send_message.await_args.args[1]
+    assert "💰 Выручка по записи" in bot.send_message.await_args.args[1]

@@ -14,10 +14,9 @@ from aiohttp import web
 import texts
 from client import valid_name, valid_phone
 from database import LOCAL_TZ, SalonDB, SlotUnavailable, local_time, utc_now
-from day_widget import compress_free_slots
 from keyboards import booking_actions
 from notifications import notify_master
-from views import bookings_for_day, free_slots_for_day
+from views import bookings_for_day, compress_free_slots, free_slots_for_day
 
 MAX_INIT_DATA_AGE = 86400
 

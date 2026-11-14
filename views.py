@@ -8,6 +8,29 @@ from database import LOCAL_TZ, SalonDB, db_time, local_time, utc_now
 from keyboards import inline_keyboard
 
 
+CLOCK_HOUR = ("🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚")
+CLOCK_HALF = ("🕧", "🕜", "🕝", "🕞", "🕟", "🕠", "🕡", "🕢", "🕣", "🕤", "🕥", "🕦")
+SOURCE_ICONS = {"link": "📱", "manual": "✍️", "reinvite": "🔁"}
+MAX_CARD_LINES = 25
+
+
+def clock_emoji(value: datetime) -> str:
+    return (CLOCK_HALF if value.minute >= 30 else CLOCK_HOUR)[value.hour % 12]
+
+
+def compress_free_slots(slots: list[datetime], step: timedelta) -> list[dict]:
+    ranges = []
+    for slot in sorted(slots):
+        if ranges and slot == ranges[-1]["_end"]:
+            ranges[-1]["_end"] = slot + step
+            ranges[-1]["end"] = f"{slot + step:%H:%M}"
+        else:
+            ranges.append({"type": "free", "start": f"{slot:%H:%M}", "end": f"{slot + step:%H:%M}", "_end": slot + step})
+    for item in ranges:
+        del item["_end"]
+    return ranges
+
+
 def bookings_for_day(db: SalonDB, day: date):
     start = datetime.combine(day, time.min, LOCAL_TZ)
     end = start + timedelta(days=1)
@@ -81,73 +104,47 @@ def day_card(db: SalonDB, day: date, now: datetime | None = None) -> str:
         (db.master_id, day.weekday()),
     ).fetchone()
     bookings = bookings_for_day(db, day)
-    blocks = db.conn.execute(
-        "SELECT * FROM blocks WHERE master_id = ? AND date = ? ORDER BY start_time",
-        (db.master_id, day.isoformat()),
-    ).fetchall()
-    booking_intervals = [
-        (local_time(row["start_at"]), local_time(row["end_at"])) for row in bookings
-    ]
-    block_intervals = [
-        (
-            datetime.combine(day, time.fromisoformat(row["start_time"]), LOCAL_TZ),
-            datetime.combine(day, time.fromisoformat(row["end_time"]), LOCAL_TZ),
-            row["reason"] or "Блок",
-        )
-        for row in blocks
-    ]
-    break_interval = None
-    if schedule and schedule["break_start"] and schedule["break_end"]:
-        break_interval = (
-            datetime.combine(day, time.fromisoformat(schedule["break_start"]), LOCAL_TZ),
-            datetime.combine(day, time.fromisoformat(schedule["break_end"]), LOCAL_TZ),
-        )
-
     free_slots = free_slots_for_day(db, day, now)
-    timeline = []
-    if not schedule or not schedule["is_working"]:
-        timeline.append(texts.DAY_NONWORKING)
-    else:
-        candidate = datetime.combine(day, time.fromisoformat(schedule["work_start"]), LOCAL_TZ)
-        work_end = datetime.combine(day, time.fromisoformat(schedule["work_end"]), LOCAL_TZ)
-        step = timedelta(minutes=master["slot_step_min"])
-        while candidate < work_end:
-            candidate_end = candidate + step
-            booking = next((row for row in bookings if local_time(row["start_at"]) == candidate), None)
-            block = next((row for row in block_intervals if row[0] == candidate), None)
-            has_break = break_interval and break_interval[0] == candidate
-            overlaps_booking = any(candidate < end and start < candidate_end for start, end in booking_intervals)
-            overlaps_block = any(candidate < end and start < candidate_end for start, end, _ in block_intervals)
-            overlaps_break = break_interval and candidate < break_interval[1] and break_interval[0] < candidate_end
-            is_free = (
-                candidate_end <= work_end
-                and candidate >= now + timedelta(hours=master["min_notice_hours"])
-                and not overlaps_booking and not overlaps_block and not overlaps_break
-            )
-            label = f"{candidate:%H:%M} ━"
-            if booking:
-                icon = "📞" if booking["source"] == "manual" else ("🔁" if booking["source"] == "reinvite" else "📱")
-                detail = f"{icon} {booking['client_name']} · {booking['service_name']}"
-                if booking["source"] == "manual":
-                    detail += " · Вручную"
-                else:
-                    detail += f" · {texts.money(booking['price'])}"
-                timeline.append(f"{label} {detail}")
-            elif block:
-                timeline.append(f"{label} 🚫 {block[2]}")
-            elif has_break:
-                timeline.append(f"{label} 🍽 Перерыв")
-            elif is_free:
-                timeline.append(f"{label} 🟢")
-            elif overlaps_booking or overlaps_block or overlaps_break:
-                timeline.append(f"{label} ·")
-            candidate += step
-
     lines = [
         texts.day_title(day, now.astimezone(LOCAL_TZ).date()),
         texts.day_summary(len(bookings), len(free_slots)),
         "",
-        *timeline,
+    ]
+    if not schedule or not schedule["is_working"]:
+        lines.append(texts.DAY_NONWORKING)
+    else:
+        for booking in bookings:
+            start = local_time(booking["start_at"])
+            end = local_time(booking["end_at"])
+            icon = SOURCE_ICONS.get(booking["source"], "📱")
+            lines.append(
+                f"{clock_emoji(start)} {start:%H:%M}–{end:%H:%M} · {booking['client_name']}"
+                f" · {booking['service_name']} · {texts.money(booking['price'])} {icon}"
+            )
+        free_ranges = compress_free_slots(free_slots, timedelta(minutes=master["slot_step_min"]))
+        blocks = db.conn.execute(
+            "SELECT * FROM blocks WHERE master_id = ? AND date = ? ORDER BY start_time",
+            (db.master_id, day.isoformat()),
+        ).fetchall()
+        if free_slots:
+            full = "🟢 Свободно: " + ", ".join(
+                f"{item['start']}–{item['end']}" for item in free_ranges
+            )
+            collapsed = (
+                f"🟢 Свободно: {len(free_slots)} "
+                f"{texts.plural(len(free_slots), 'окно', 'окна', 'окон')} "
+                f"по {master['slot_step_min']} мин "
+                f"({free_ranges[0]['start']}–{free_ranges[0]['end']} и ещё)"
+            )
+            prospective = len(lines) + 1 + len(blocks) + 2
+            if schedule["break_start"] and schedule["break_end"]:
+                prospective += 1
+            lines.append(collapsed if prospective > MAX_CARD_LINES else full)
+        if schedule["break_start"] and schedule["break_end"]:
+            lines.append(f"☕ Перерыв {schedule['break_start']}–{schedule['break_end']}")
+        for block in blocks:
+            lines.append(f"🚫 {block['reason'] or 'Блок'} {block['start_time']}–{block['end_time']}")
+    lines += [
         "",
         texts.DAY_REVENUE.format(amount=texts.money(sum(row["price"] for row in bookings))),
     ]

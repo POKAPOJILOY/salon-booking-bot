@@ -135,7 +135,15 @@ def done_text(action: str) -> str:
 DAY_NONWORKING = "Выходной. Свободных окон для записи нет."
 WEEK_SCHEDULE_TITLE = "🕐 Моё расписание"
 DAY_PICK = "📅 Выбрать дату"
-DAY_REVENUE = "Выручка по записи дня: {amount}"
+DAY_REVENUE = "💰 Выручка по записи: {amount}"
+
+BLOCK_MENU_TITLE = "🔒 Блоки времени"
+BLOCK_NEW = "➕ Новый блок"
+BLOCKS_MY = "📋 Мои блоки"
+BLOCKS_EMPTY = "Нет запланированных блоков."
+BLOCK_CANCEL = "✖ Отмена"
+BLOCK_DELETE_CONFIRM = "Удалить блок {interval} ({reason}) {day}?"
+BLOCK_NOT_FOUND = "Блок не найден."
 
 
 def plural(value: int, one: str, few: str, many: str) -> str:

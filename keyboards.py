@@ -56,6 +56,7 @@ def next_step_keyboard(scenario: str) -> InlineKeyboardMarkup:
             (texts.MASTER_ADD, "admin_manual"),
         ],
         "block": [
+            (texts.BLOCKS_MY, "admin_blocks"),
             (texts.MASTER_BOOKINGS, "admin_bookings"),
             (texts.NEXT_SCHEDULE, "admin_schedule"),
         ],

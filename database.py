@@ -228,6 +228,31 @@ class SalonDB:
             )
             return cursor.lastrowid
 
+    def get_block(self, block_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM blocks WHERE id = ? AND master_id = ?",
+            (block_id, self.master_id),
+        ).fetchone()
+
+    def list_blocks(self, from_date: date | None = None) -> list[sqlite3.Row]:
+        if from_date is None:
+            return self.conn.execute(
+                "SELECT * FROM blocks WHERE master_id = ? ORDER BY date, start_time",
+                (self.master_id,),
+            ).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM blocks WHERE master_id = ? AND date >= ? ORDER BY date, start_time",
+            (self.master_id, from_date.isoformat()),
+        ).fetchall()
+
+    def delete_block(self, block_id: int) -> sqlite3.Row:
+        with self.transaction() as conn:
+            block = self.get_block(block_id)
+            if not block:
+                raise ValueError("Блок не найден")
+            conn.execute("DELETE FROM blocks WHERE id = ?", (block_id,))
+            return block
+
     def upsert_client(self, tg_id: int, name: str, phone: str) -> int:
         if not name.strip() or not phone.strip():
             raise ValueError("Имя и телефон обязательны")
